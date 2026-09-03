@@ -13,8 +13,8 @@ MCP tools over SQLite · Twilio SIP · Next.js
 | Stage | | |
 |---|---|---|
 | 1 | Repo skeleton | done |
-| 2 | MCP tool server | in progress |
-| 3 | Agent worker (STT/LLM/TTS) | |
+| 2 | MCP tool server | done |
+| 3 | Agent worker (STT/LLM/TTS) | in progress |
 | 4 | Tools + prompts wired | |
 | 5 | Fallback + metrics | |
 | 6 | Web app | |
