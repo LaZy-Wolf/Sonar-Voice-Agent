@@ -128,3 +128,45 @@ setting it changed nothing while briefly appearing to make things worse. And the
 `smoke_call.py` time-to-first-audio figure is an audio-energy heuristic that still reports
 implausible values; it is labelled approximate rather than polished, because stage 5's
 metrics sink reads LiveKit's own per-stage numbers and will replace it.
+
+## Stage 5 — first real latency numbers, and where the floor actually is
+
+Over the first turns measured through the metrics sink:
+
+| Stage | p50 | target | |
+|---|---|---|---|
+| End-of-utterance | 632 ms | 350 ms | over |
+| Transcription | 513 ms | 150 ms | over |
+| LLM first token | 489 ms | 500 ms | met |
+| TTS first byte | 144 ms | 150 ms | met |
+| Time-to-first-audio | 1286 ms | 900 ms | over |
+
+The two model stages hit their targets. The overage is entirely in hearing the caller.
+
+**A tuning hypothesis that was wrong.** `min_endpointing_delay` was 0.4 s and lands in
+time-to-first-audio one-for-one, so halving it looked like free latency. It changed
+nothing: end-of-utterance went from 632 ms to 642 ms. The delay is not the binding
+constraint. Note the relationship in the table instead — end-of-utterance runs about
+180 ms behind transcription, because the turn cannot end until the final transcript
+arrives. The knob to turn is transcription, not endpointing. Reverted to 0.4 s, which is
+also the safer value against cutting people off mid-sentence.
+
+**The floor is geographic.** Round-trip from this machine, five fresh connections each:
+
+| Provider | median RTT |
+|---|---|
+| NVIDIA NIM | 106 ms |
+| Groq | 423 ms |
+| Deepgram | 1115 ms |
+| Cartesia | 1853 ms |
+
+The agent runs in India, the LiveKit project is in India South, and Deepgram and Cartesia
+have no nearby region. Persistent WebSockets amortise the handshake, so steady-state is
+better than these figures, but the distance is in every turn and no configuration removes
+it. The irony is that NVIDIA has the best network path of the four and was still dropped
+for compute variance.
+
+This makes the 900 ms target unreachable from here with these providers. That is a finding
+worth publishing rather than hiding: the README should give the measured p50/p95 with the
+geography stated, since "1.3 s from India to US-hosted STT and TTS" is a more credible
+engineering claim than a round number with no context.
