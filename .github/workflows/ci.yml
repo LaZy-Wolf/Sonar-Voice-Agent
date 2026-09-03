@@ -13,8 +13,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      # The runner's system Python is externally managed, so --system fails.
-      - run: uv venv
+      # setup-uv already creates .venv and exports VIRTUAL_ENV; --system would hit
+      # the runner's externally managed Python, and `uv venv` would hit the existing one.
       - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - run: uv pip install -e "./mcp-server[dev]" -e "./agent[dev]"
       - run: ruff check .
