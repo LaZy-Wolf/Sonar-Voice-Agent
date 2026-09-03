@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     max_reply_tokens: int = 400
     # Seconds a provider gets to produce its first token before the chain moves on.
     llm_attempt_timeout: float = 2.5
+    # Floor on how long to wait after speech stops before deciding the turn is over.
+    # It lands in time-to-first-audio one-for-one, so it is the cheapest latency knob —
+    # and the riskiest: too low and the agent talks over people who were mid-thought.
+    min_endpointing_delay: float = 0.4
 
 
 settings = Settings()

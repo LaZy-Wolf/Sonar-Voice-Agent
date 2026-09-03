@@ -22,15 +22,18 @@ from livekit.agents import (
     AgentSession,
     JobContext,
     JobProcess,
+    MetricsCollectedEvent,
     RoomInputOptions,
     WorkerOptions,
     cli,
     mcp,
+    metrics,
 )
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from config import build_llm, build_stt, build_tts, settings
+from metrics_sink import MetricsSink
 from prompts import GREETING_INBOUND, GREETING_OUTBOUND, SYSTEM_PROMPT
 
 load_dotenv(dotenv_path=str(Path(__file__).resolve().parent.parent / ".env"))
@@ -90,9 +93,16 @@ async def entrypoint(ctx: JobContext) -> None:
         turn_detection=MultilingualModel(),
         allow_interruptions=True,
         min_interruption_duration=0.5,
-        min_endpointing_delay=0.4,
+        min_endpointing_delay=settings.min_endpointing_delay,
         max_endpointing_delay=3.0,
     )
+
+    sink = MetricsSink(room=ctx.room, jsonl_path=settings.metrics_jsonl)
+
+    @session.on("metrics_collected")
+    def _on_metrics(ev: MetricsCollectedEvent) -> None:
+        metrics.log_metrics(ev.metrics)
+        sink.ingest(ev.metrics)
 
     await session.start(room=ctx.room, agent=HeliosAgent(), room_input_options=RoomInputOptions())
 

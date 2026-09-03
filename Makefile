@@ -32,6 +32,9 @@ test:
 lint:
 	$(PY) -m ruff check .
 
+report-md:
+	$(PY) scripts/latency_report.py --markdown
+
 report:
 	$(PY) scripts/latency_report.py --jsonl agent/data/turns.jsonl
 
