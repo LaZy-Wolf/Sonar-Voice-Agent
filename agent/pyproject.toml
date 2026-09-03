@@ -25,3 +25,13 @@ line-length = 100
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# The worker is an app, not a library: main.py, config.py and prompts.py sit flat in
+# agent/ and are run as `python main.py`. Setuptools cannot guess that from a flat
+# layout, so name them. Tests reach them via agent/tests/conftest.py.
+py-modules = ["main", "config", "prompts"]
