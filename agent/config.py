@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     # Voice replies are short by construction; this is a backstop against a model that
     # ignores the prompt and monologues down the phone.
     max_reply_tokens: int = 400
+    # Seconds a provider gets to produce its first token before the chain moves on.
+    llm_attempt_timeout: float = 2.5
 
 
 settings = Settings()
@@ -86,7 +88,16 @@ def build_llm() -> _llm.LLM:
         return primary
 
     fallback = groq.LLM(model=settings.groq_llm_model, api_key=settings.groq_api_key)
-    return _llm.FallbackAdapter(llm=[primary, fallback])
+    # NIM's free tier is fast at the median and terrible in the tail: the same call has
+    # taken 287 ms and 6.8 s, and a follow-up call carrying a tool result stalled for
+    # 8.4 s in testing. A caller will not wait. Give NVIDIA a short window to be the
+    # brain, then hand the turn to Groq rather than leaving dead air on the line.
+    # attempt_timeout defaults to 5s, which is five seconds of silence on a phone call
+    # before the fallback is even considered. max_retry_per_llm is left at its default
+    # of 0 (no in-turn retry), which is already the right behaviour for voice.
+    return _llm.FallbackAdapter(
+        llm=[primary, fallback], attempt_timeout=settings.llm_attempt_timeout
+    )
 
 
 def build_tts() -> cartesia.TTS:
