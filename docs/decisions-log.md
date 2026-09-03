@@ -31,12 +31,18 @@ Python 3.12 on Windows directly, so the WSL2 requirement went with it. The Makef
 
 ## Stage 2 — MCP tool server
 
-**`mcp` 2.x, not the plan's 1.x.** The installed SDK renamed `FastMCP` to `MCPServer`
-and moved the transport options (`host`, `port`, `stateless_http`) off the constructor
-and onto `run()`. Adapted rather than pinning `mcp<2` — there is no reason for a new
-project to start on a deprecated major. The client-side names moved too:
-`streamablehttp_client` became `streamable_http_client`, and `Tool.inputSchema` became
-`Tool.input_schema`.
+**`mcp` is pinned to 1.x — reversing an earlier call in this same stage.**
+The installed SDK is 2.x, which renames `FastMCP` to `MCPServer` and moves the transport
+options onto `run()`, so the server was first written against 2.x on the reasoning that a
+new project should not start on a deprecated major. That was wrong: `livekit-agents[mcp]`
+requires `mcp<2,>=1.24.0`, and its MCP *client* fails to import against 2.x. The library we
+picked as the whole framework gets to set this constraint. The server is back on `FastMCP`,
+`mcp>=1.24,<2` is pinned, and `agent/` now declares `livekit-agents[mcp]` so the constraint
+is in the dependency graph rather than in someone's memory. Revisit when livekit-agents
+supports 2.x.
+
+The lesson worth keeping: check the *consumer* of a library before adopting its new major,
+not just the library.
 
 **MCP server port is 8811, not 8000.** Docker Desktop's backend already listens on
 8000 on the development machine, and on Windows the second bind succeeds rather than
