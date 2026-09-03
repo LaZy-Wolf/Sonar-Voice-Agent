@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     cartesia_voice: str = ""
 
     groq_api_key: str = ""
-    groq_llm_model: str = "llama-3.3-70b-versatile"
+    groq_llm_model: str = "qwen/qwen3.8-27b"
 
     mcp_server_url: str = "http://localhost:8811/mcp"
     metrics_jsonl: str = "./data/turns.jsonl"

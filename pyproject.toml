@@ -1,0 +1,16 @@
+# Repo-root tooling config. Without this, `ruff check .` picks up whatever global
+# config the developer happens to have, so CI and a laptop can disagree about what
+# "clean" means. Nothing is published from here; the packages are agent/ and mcp-server/.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "web"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "BLE"]
+
+[tool.ruff.lint.per-file-ignores]
+# A diagnostic tool must survive any provider failing in any way: one dead API should
+# report as one failed line, not abort the other checks.
+"scripts/check_creds.py" = ["BLE001"]
