@@ -16,9 +16,9 @@ MCP tools over SQLite · Twilio SIP · Next.js
 | 2 | MCP tool server | done |
 | 3 | Agent worker (STT/LLM/TTS) | done |
 | 4 | Tools + prompts wired | done |
-| 5 | Fallback + metrics | in progress |
-| 6 | Web app | |
-| 7 | Twilio inbound | |
+| 5 | Fallback + metrics | done |
+| 6 | Web app | done |
+| 7 | Twilio inbound | in progress |
 | 8 | Twilio outbound | |
 | 9 | Tuning, docs, demo | |
 

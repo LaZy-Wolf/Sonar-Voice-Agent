@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
+import json
 import os
 import sys
 import time
@@ -79,6 +81,7 @@ async def main(question: str) -> int:
     agent_spoke = asyncio.Event()
     first_audio_at: list[float] = []
     transcript: list[str] = []
+    metrics: list[dict] = []
     # Audio before this instant is the greeting, not an answer to us. Without the gate,
     # greeting frames get timed against a later question and TTFA comes out negative.
     gate = [float("inf")]
@@ -117,6 +120,14 @@ async def main(question: str) -> int:
             if s.final:
                 who = getattr(participant, "identity", "?")
                 transcript.append(f"  [{who}] {s.text}")
+
+    # The browser HUD reads these frames off the same topic. Capturing them here proves
+    # the publish path over the wire, not just that the agent wrote a JSONL line.
+    @room.on("data_received")
+    def _on_data(packet: rtc.DataPacket):
+        if packet.topic == "sonar.metrics":
+            with contextlib.suppress(Exception):
+                metrics.append(json.loads(packet.data.decode()))
 
     await room.connect(env("LIVEKIT_URL"), token)
     print(f"joined {room_name}; waiting for the agent to join...")
@@ -191,6 +202,28 @@ async def main(question: str) -> int:
     print(f"reply complete {replied_at - spoke_at:.1f}s after the question ended")
 
     ok = 0
+
+    # The same frames the browser HUD renders. Checking them here proves the publish
+    # path over the wire, and that the payload carries every field the HUD reads.
+    if not metrics:
+        print("\nFAIL: no metrics arrived on the data channel; the HUD would stay empty")
+        await room.disconnect()
+        return 1
+
+    m = metrics[-1]
+    print(f"\nmetrics over the data channel ({len(metrics)} frame(s)):")
+    print(f"  ttfa {m.get('ttfa_estimate_ms')} ms = eou {m.get('eou_delay_ms')}"
+          f" + llm {m.get('llm_ttft_ms')} + tts {m.get('tts_ttfb_ms')}")
+    print(f"  served by {m.get('stt_provider')} / {m.get('llm_provider')}"
+          f" / {m.get('tts_provider')}")
+    missing = [
+        k for k in ("ttfa_estimate_ms", "eou_delay_ms", "llm_ttft_ms", "tts_ttfb_ms",
+                    "speech_id") if k not in m
+    ]
+    if missing:
+        print(f"  FAIL: the HUD expects these fields and they are absent: {missing}")
+        ok = 1
+
     # Audio arriving is not the same as the right answer arriving. For the default
     # question the knowledge base says 25 years, so the reply has to contain it.
     if question == DEFAULT_QUESTION:

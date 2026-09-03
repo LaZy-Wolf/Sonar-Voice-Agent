@@ -20,6 +20,24 @@ jobs:
       - run: ruff check .
       - run: pytest mcp-server/tests agent/tests -q
 
-  # The web/ job is added in stage 6, when web/ exists. A job guarded on
-  # hashFiles('web/package.json') does not work: hashFiles is unavailable in a
-  # job-level `if`, and the whole workflow fails to parse.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      # The build needs these present, not valid: the token route reads them at
+      # request time, and nothing here makes a request.
+      - run: npm run build
+        working-directory: web
+        env:
+          LIVEKIT_URL: wss://example.livekit.cloud
+          LIVEKIT_API_KEY: ci
+          LIVEKIT_API_SECRET: ci

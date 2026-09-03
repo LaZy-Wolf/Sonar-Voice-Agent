@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/* An instrument panel, not a landing page: you watch these numbers move while you
+   talk, so the surface stays dark and the accent is spent only on live state. */
+@theme {
+  --color-ink-950: oklch(16% 0.008 65);
+  --color-ink-900: oklch(20% 0.009 65);
+  --color-ink-850: oklch(24% 0.010 65);
+  --color-ink-800: oklch(29% 0.011 65);
+  /* 52% measured 3.52:1 on the page background, under the 4.5:1 body minimum. */
+  --color-ink-600: oklch(63% 0.013 65);
+  --color-ink-400: oklch(69% 0.010 65);
+  --color-ink-200: oklch(88% 0.008 65);
+  --color-ink-50: oklch(96% 0.006 65);
+
+  /* One accent, from the domain: sunlight on a panel. */
+  --color-solar-400: oklch(80% 0.155 72);
+  --color-solar-500: oklch(72% 0.170 66);
+
+  --color-under: oklch(72% 0.150 155);
+  --color-over: oklch(68% 0.170 32);
+
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-200);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Latency figures are compared column-to-column; they must not shimmy as they update. */
+.tnum {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.24s var(--ease-out-strong) both;
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.35; }
+}
+
+.live-dot {
+  animation: pulse-ring 1.8s var(--ease-out-strong) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+  .live-dot {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
