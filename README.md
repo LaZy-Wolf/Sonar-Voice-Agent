@@ -18,9 +18,9 @@ MCP tools over SQLite · Twilio SIP · Next.js
 | 4 | Tools + prompts wired | done |
 | 5 | Fallback + metrics | done |
 | 6 | Web app | done |
-| 7 | Twilio inbound | in progress |
-| 8 | Twilio outbound | |
-| 9 | Tuning, docs, demo | |
+| 7 | Twilio inbound | done |
+| 8 | Twilio outbound | done |
+| 9 | Tuning, docs, demo | in progress |
 
 ## Running locally
 

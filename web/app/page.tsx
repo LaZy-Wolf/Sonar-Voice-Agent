@@ -4,6 +4,7 @@ import { RoomAudioRenderer, RoomContext, StartAudio } from "@livekit/components-
 import { ConnectionState, Room, RoomEvent } from "livekit-client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CallPanel } from "@/components/CallPanel";
+import { DialOut } from "@/components/DialOut";
 import { LatencyHud } from "@/components/LatencyHud";
 import { Transcript } from "@/components/Transcript";
 
@@ -82,6 +83,7 @@ export default function Home() {
         <div className="flex min-h-0 flex-col divide-y divide-ink-850 border-t border-ink-850 lg:border-t-0">
           <LatencyHud />
           <Transcript agentIdentity={agentIdentity} />
+          <DialOut />
         </div>
       </main>
     </RoomContext.Provider>

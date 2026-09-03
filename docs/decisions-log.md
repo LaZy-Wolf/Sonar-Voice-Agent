@@ -170,3 +170,33 @@ This makes the 900 ms target unreachable from here with these providers. That is
 worth publishing rather than hiding: the README should give the measured p50/p95 with the
 geography stated, since "1.3 s from India to US-hosted STT and TTS" is a more credible
 engineering claim than a round number with no context.
+
+## Stages 7 and 8 — telephony
+
+**Trunk configuration is code, not console clicks.** `scripts/setup_sip.py` creates the
+LiveKit inbound trunk, outbound trunk and dispatch rule, then sets Twilio's origination
+URI and attaches the phone number. It is idempotent, so it doubles as a way to verify the
+wiring after a credential change. The idempotent path had a bug on first run
+(`SIPDispatchRuleInfo` has no `sip_trunk_id`); running it twice is what found it.
+
+Created on this account:
+
+| Thing | Id |
+|---|---|
+| LiveKit inbound trunk | `ST_RznfDA6SUeFC` for `+12344007106` |
+| LiveKit outbound trunk | `ST_Gn7EisSVPoWF` to `sonar-agent.pstn.twilio.com` |
+| Dispatch rule | `SDR_3Mzm5pHP2CzE`, one room per caller under `sonar-call-` |
+| Twilio origination | `sip:voice-agent-8ftbei79.sip.livekit.cloud;transport=tcp` |
+
+**One room per caller, not a shared room.** The dispatch rule uses the individual rule
+with a room prefix. A direct rule would put two simultaneous callers into the same room
+and therefore the same conversation.
+
+**Outbound calls carry their brief as room metadata.** `POST /api/call` creates the room
+with `{phone_number, reason}` before dialling, because the agent has to know who it rang
+and why by the time the callee says hello. Creating the room after the dial would race the
+answer. The agent reads the metadata on connect and switches to the outbound greeting.
+
+**The account is a Twilio trial**, with one verified number (`+917075400204`) and $14.35 of
+credit. Inbound is only accepted from verified numbers and outbound can only reach them,
+which is a property of the account rather than of this code. Upgrading lifts both limits.
