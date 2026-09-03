@@ -13,7 +13,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv pip install --system -e "./mcp-server[dev]" -e "./agent[dev]"
+      # The runner's system Python is externally managed, so --system fails.
+      - run: uv venv
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - run: uv pip install -e "./mcp-server[dev]" -e "./agent[dev]"
       - run: ruff check .
       - run: pytest mcp-server/tests agent/tests -q
 
