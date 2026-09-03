@@ -43,3 +43,9 @@ warm:
 
 sip:
 	$(PY) scripts/setup_sip.py
+
+check:
+	$(PY) scripts/check_creds.py
+
+smoke:
+	$(PY) scripts/smoke_call.py
