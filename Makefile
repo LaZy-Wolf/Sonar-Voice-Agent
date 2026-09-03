@@ -30,7 +30,7 @@ test:
 	$(PY) -m pytest mcp-server/tests agent/tests -q
 
 lint:
-	$(PY) -m ruff check agent mcp-server scripts
+	$(PY) -m ruff check .
 
 report:
 	$(PY) scripts/latency_report.py --jsonl agent/data/turns.jsonl
