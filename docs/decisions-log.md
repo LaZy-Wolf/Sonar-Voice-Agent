@@ -100,3 +100,31 @@ does not block them.
 **A root `pyproject.toml` now pins the ruff configuration.** Without it `ruff check .` used
 whatever global config the machine happened to have, so CI and a laptop could disagree
 about what "clean" means.
+
+## Stage 3 (revised) — Groq leads, Nemotron backs it up
+
+Nemotron was the intended brain and the design named it as such. Measurement reversed the
+order, with the project owner's agreement.
+
+| Model | median TTFT | worst | failures |
+|---|---|---|---|
+| `nvidia/nemotron-3-super-120b-a12b` (NIM free tier) | 597 ms | 5203 ms | timeouts and connection errors under live session load |
+| `qwen/qwen3.8-27b` (Groq) | 355 ms | 456 ms | none across every run |
+
+Both call tools correctly; this is purely about latency. The failure that settled it
+appeared only in a live call rather than in isolated benchmarks: the *second* LLM call of
+a turn, the one carrying a tool result back to the model, timed out repeatedly on NIM. In
+one run the caller would have heard 5.6 seconds of silence while the adapter worked
+through NVIDIA before Groq answered.
+
+A median around 600 ms is perfectly good. A p95 over 5 s is not, and on a phone call it is
+the p95 that people hang up on. Groq is therefore primary and Nemotron is the fallback,
+where it still serves turns whenever Groq is rate limited. Nemotron remains in the stack
+and in the README, described accurately.
+
+Two corrections made while chasing this, recorded because both were wrong turns:
+`max_retry_per_llm=0` was set to "stop wasteful retries" — it is already the default, and
+setting it changed nothing while briefly appearing to make things worse. And the
+`smoke_call.py` time-to-first-audio figure is an audio-energy heuristic that still reports
+implausible values; it is labelled approximate rather than polished, because stage 5's
+metrics sink reads LiveKit's own per-stage numbers and will replace it.

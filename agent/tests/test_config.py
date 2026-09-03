@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from livekit.agents import llm as _llm
-from livekit.plugins import cartesia, deepgram
+from livekit.plugins import cartesia, deepgram, groq
 
 import config as cfg
 
@@ -33,14 +33,28 @@ def test_tts_is_cartesia(settings):
     assert isinstance(cfg.build_tts(), cartesia.TTS)
 
 
-def test_single_llm_without_a_groq_key(settings):
-    """No fallback key means no adapter — one provider, not a chain of one."""
+def test_one_key_means_no_adapter(settings):
+    """A chain of one is just a provider; wrapping it buys nothing."""
     assert not isinstance(cfg.build_llm(), _llm.FallbackAdapter)
 
 
-def test_groq_key_adds_a_fallback(settings, monkeypatch):
+def test_both_keys_build_a_chain(settings, monkeypatch):
     monkeypatch.setattr(cfg.settings, "groq_api_key", "gq-test")
     assert isinstance(cfg.build_llm(), _llm.FallbackAdapter)
+
+
+def test_groq_leads_the_chain(settings, monkeypatch):
+    """Ordering is measured, not preferred: Groq's p95 is 456ms, NVIDIA's is over 5s."""
+    monkeypatch.setattr(cfg.settings, "groq_api_key", "gq-test")
+    first = cfg.build_llm()._llm_instances[0]
+    assert isinstance(first, groq.LLM), f"expected Groq first, got {type(first).__name__}"
+
+
+def test_no_keys_at_all_fails_loudly(settings, monkeypatch):
+    """Silently starting with no brain would surface as an agent that never answers."""
+    monkeypatch.setattr(cfg.settings, "nvidia_api_key", "")
+    with pytest.raises(RuntimeError, match="No LLM configured"):
+        cfg.build_llm()
 
 
 def test_thinking_disabled_by_default(settings):

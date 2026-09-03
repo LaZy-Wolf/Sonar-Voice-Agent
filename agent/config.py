@@ -70,13 +70,14 @@ def build_stt() -> deepgram.STT:
     )
 
 
-def build_llm() -> _llm.LLM:
-    """Nemotron via NVIDIA NIM, with Groq behind it when a key is present."""
+def _nemotron() -> openai.LLM:
+    """Nemotron through NVIDIA NIM's OpenAI-compatible endpoint."""
     extra_body = {}
     if settings.nvidia_disable_thinking:
+        # Reasoning costs seconds of time-to-first-token: ~600 ms off versus 0.9-4.4 s on.
+        # Tool calling works either way.
         extra_body["chat_template_kwargs"] = {"thinking": False}
-
-    primary = openai.LLM(
+    return openai.LLM(
         model=settings.nvidia_llm_model,
         base_url=settings.nvidia_base_url,
         api_key=settings.nvidia_api_key,
@@ -84,20 +85,33 @@ def build_llm() -> _llm.LLM:
         max_completion_tokens=settings.max_reply_tokens,
         extra_body=extra_body or openai.NOT_GIVEN,
     )
-    if not settings.groq_api_key:
-        return primary
 
-    fallback = groq.LLM(model=settings.groq_llm_model, api_key=settings.groq_api_key)
-    # NIM's free tier is fast at the median and terrible in the tail: the same call has
-    # taken 287 ms and 6.8 s, and a follow-up call carrying a tool result stalled for
-    # 8.4 s in testing. A caller will not wait. Give NVIDIA a short window to be the
-    # brain, then hand the turn to Groq rather than leaving dead air on the line.
+
+def build_llm() -> _llm.LLM:
+    """Groq first, Nemotron behind it.
+
+    This ordering is the result of measurement, not preference. Nemotron was the intended
+    brain and its tool calling is faultless, but NVIDIA NIM's free tier has a median
+    time-to-first-token around 600 ms and a worst case over 5 s, and it timed out
+    repeatedly on the follow-up call that carries a tool result back to the model. Groq
+    measured 355 ms median, 456 ms worst, with no failures across every test run. On a
+    phone call the tail is what the caller hears, so Groq leads and Nemotron covers Groq's
+    rate limits. See docs/decisions-log.md for the numbers.
+    """
+    chain = []
+    if settings.groq_api_key:
+        chain.append(groq.LLM(model=settings.groq_llm_model, api_key=settings.groq_api_key))
+    if settings.nvidia_api_key:
+        chain.append(_nemotron())
+    if not chain:
+        raise RuntimeError("No LLM configured: set GROQ_API_KEY or NVIDIA_API_KEY in .env")
+    if len(chain) == 1:
+        return chain[0]
+
     # attempt_timeout defaults to 5s, which is five seconds of silence on a phone call
     # before the fallback is even considered. max_retry_per_llm is left at its default
     # of 0 (no in-turn retry), which is already the right behaviour for voice.
-    return _llm.FallbackAdapter(
-        llm=[primary, fallback], attempt_timeout=settings.llm_attempt_timeout
-    )
+    return _llm.FallbackAdapter(llm=chain, attempt_timeout=settings.llm_attempt_timeout)
 
 
 def build_tts() -> cartesia.TTS:
