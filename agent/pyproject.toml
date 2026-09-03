@@ -1,0 +1,27 @@
+[project]
+name = "sonar-agent"
+version = "0.1.0"
+description = "SONAR voice agent worker — LiveKit Agents, Deepgram, Nemotron, Cartesia"
+requires-python = ">=3.12"
+dependencies = [
+    "livekit-agents>=1.7,<2",
+    "livekit-plugins-deepgram>=1.7",
+    "livekit-plugins-openai>=1.7",
+    "livekit-plugins-cartesia>=1.7",
+    "livekit-plugins-groq>=1.7",
+    "livekit-plugins-silero>=1.7",
+    "livekit-plugins-turn-detector>=1.7",
+    "livekit-api>=1.0",
+    "pydantic-settings>=2",
+    "python-dotenv>=1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
