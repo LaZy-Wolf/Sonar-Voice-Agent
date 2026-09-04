@@ -11,24 +11,26 @@ participants in a room, so the only thing that differs is the opening line.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentSession,
     JobContext,
     JobProcess,
     MetricsCollectedEvent,
-    RoomInputOptions,
     WorkerOptions,
     cli,
     mcp,
     metrics,
 )
+from livekit.agents.voice.room_io import RoomOptions
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -47,6 +49,9 @@ for stream in (sys.stdout, sys.stderr):
 
 logging.basicConfig(level=settings.log_level)
 log = logging.getLogger("sonar")
+
+# LiveKit reports outbound call progress on the SIP participant under this key.
+SIP_STATUS_ATTR = "sip.callStatus"
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -80,6 +85,63 @@ def _call_context(ctx: JobContext) -> dict:
         return {}
 
 
+async def wait_until_answered(
+    ctx: JobContext, number: str, timeout: float = 60.0, poll_interval: float = 0.15
+) -> bool:
+    """Block until the person we rang actually picks up.
+
+    `createSipParticipant` returns while the phone is still ringing, so without this the
+    agent greets an unanswered line, finishes, and is sitting silently by the time the
+    callee says hello. That is exactly what a real test call produced: the caller picked
+    up, heard nothing, said "hello, is anyone there", and hung up.
+
+    LiveKit reports progress on the SIP participant as `sip.callStatus`: `dialing` while
+    ringing, `active` once answered, `automation` while sending DTMF, `hangup` if it
+    ends. Returns False if the call is never answered.
+    """
+    log.info("outbound call to %s: waiting for an answer", number)
+    try:
+        participant = await asyncio.wait_for(
+            ctx.wait_for_participant(kind=rtc.ParticipantKind.PARTICIPANT_KIND_SIP),
+            timeout=timeout,
+        )
+    except TimeoutError:
+        log.warning("no SIP participant joined within %.0fs", timeout)
+        return False
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    # sip.callStatus has been reported empty on some deployments. If it never appears,
+    # fall back to the presence of published audio: media only flows once the call is up.
+    fallback_after = loop.time() + min(8.0, timeout / 2)
+    last = None
+
+    while loop.time() < deadline:
+        status = participant.attributes.get(SIP_STATUS_ATTR)
+        if status != last:
+            log.info("sip.callStatus=%s", status)
+            last = status
+        if status in ("active", "automation"):
+            return True
+        if status == "hangup":
+            log.info("callee hung up before answering")
+            return False
+        if status is None and loop.time() > fallback_after and _has_audio(participant):
+            log.warning("sip.callStatus never appeared; treating published audio as answered")
+            return True
+        await asyncio.sleep(poll_interval)
+
+    log.warning("call was never answered within %.0fs (last status %s)", timeout, last)
+    return False
+
+
+def _has_audio(participant) -> bool:
+    return any(
+        pub.kind == rtc.TrackKind.KIND_AUDIO
+        for pub in getattr(participant, "track_publications", {}).values()
+    )
+
+
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     meta = _call_context(ctx)
@@ -104,16 +166,31 @@ async def entrypoint(ctx: JobContext) -> None:
         metrics.log_metrics(ev.metrics)
         sink.ingest(ev.metrics)
 
-    await session.start(room=ctx.room, agent=HeliosAgent(), room_input_options=RoomInputOptions())
-
+    # An outbound call must not be greeted until it is answered, so the wait happens
+    # before the session starts rather than before the greeting: starting the session
+    # opens the TTS connection and audio pipeline, and none of that should run against
+    # a ringing line.
     greeting = GREETING_INBOUND
     if outbound:
+        if not await wait_until_answered(ctx, meta["phone_number"]):
+            log.info("ending job: outbound call was not answered")
+            ctx.shutdown(reason="not answered")
+            return
         # The reason for the call is written by whoever triggered it, so give it to the
         # model as instructions rather than trusting it to be a well-formed sentence.
         greeting = f"{GREETING_OUTBOUND}\n\nReason for this call: {meta.get('reason', 'a follow-up')}"
+
+    await session.start(room=ctx.room, agent=HeliosAgent(), room_options=RoomOptions())
     log.info("session started (%s)", "outbound" if outbound else "inbound/web")
 
-    await session.generate_reply(instructions=greeting)
+    # A failure here is the difference between a working agent and a silent phone line,
+    # so it must be loud rather than an unhandled task exception nobody sees.
+    try:
+        await session.generate_reply(instructions=greeting)
+        log.info("greeting delivered")
+    except Exception:
+        log.exception("greeting failed; the caller is hearing silence")
+        raise
 
 
 if __name__ == "__main__":
@@ -122,5 +199,8 @@ if __name__ == "__main__":
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
             port=settings.worker_http_port,
+            # Dev defaults to zero warmed processes, so a job spins one up while the
+            # phone is ringing. One idle process removes that from the call path.
+            num_idle_processes=1,
         )
     )

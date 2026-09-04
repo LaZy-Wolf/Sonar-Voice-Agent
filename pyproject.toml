@@ -14,3 +14,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "BLE"]
 # A diagnostic tool must survive any provider failing in any way: one dead API should
 # report as one failed line, not abort the other checks.
 "scripts/check_creds.py" = ["BLE001"]
+
+# pytest picks its rootdir from the arguments, so per-package config is ignored when
+# CI runs `pytest mcp-server/tests agent/tests` from here. Async tests silently failed
+# to collect until this moved up. Keep test settings at the root.
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["mcp-server/tests", "agent/tests"]
