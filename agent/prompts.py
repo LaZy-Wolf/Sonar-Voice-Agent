@@ -42,13 +42,20 @@ take their details as a lead instead and tell them someone will be in touch.
 step. Never read out an error.
 """
 
-GREETING_INBOUND = (
-    "Greet the caller warmly in one short sentence, say you are Sonar from Helios Solar, "
-    "and ask how you can help."
-)
+# Spoken verbatim, not generated. Asking the model to compose "hello" costs a full
+# LLM round trip before the caller hears anything: on a real phone call that was about
+# three and a half seconds of silence after they said hello. These go straight to TTS.
+GREETING_INBOUND = "Hello, this is Sonar at Helios Solar. How can I help you today?"
 
 GREETING_OUTBOUND = (
-    "You placed this call. Greet the person, say you are Sonar calling from Helios Solar, "
-    "state in one sentence why you are calling, and ask whether now is a good time. "
-    "If they say it is not, apologise briefly, offer to call back later, and end the call."
+    "Hello, this is Sonar calling from Helios Solar. "
+    "Is now a good time to talk for a moment?"
+)
+
+# Given to the model as context rather than spoken, so its follow-up knows why it rang.
+OUTBOUND_BRIEF = (
+    "You placed this outbound call. You have already introduced yourself and asked "
+    "whether now is a good time, so do not greet them again. The reason for the call "
+    "is: {reason}. If they say it is not a good time, apologise briefly, offer to call "
+    "back later, and end the call."
 )

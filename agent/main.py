@@ -36,7 +36,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from config import build_llm, build_stt, build_tts, settings
 from metrics_sink import MetricsSink
-from prompts import GREETING_INBOUND, GREETING_OUTBOUND, SYSTEM_PROMPT
+from prompts import GREETING_INBOUND, GREETING_OUTBOUND, OUTBOUND_BRIEF, SYSTEM_PROMPT
 
 load_dotenv(dotenv_path=str(Path(__file__).resolve().parent.parent / ".env"))
 
@@ -166,27 +166,31 @@ async def entrypoint(ctx: JobContext) -> None:
         metrics.log_metrics(ev.metrics)
         sink.ingest(ev.metrics)
 
-    # An outbound call must not be greeted until it is answered, so the wait happens
-    # before the session starts rather than before the greeting: starting the session
-    # opens the TTS connection and audio pipeline, and none of that should run against
-    # a ringing line.
-    greeting = GREETING_INBOUND
+    agent = HeliosAgent()
     if outbound:
-        if not await wait_until_answered(ctx, meta["phone_number"]):
-            log.info("ending job: outbound call was not answered")
-            ctx.shutdown(reason="not answered")
-            return
-        # The reason for the call is written by whoever triggered it, so give it to the
-        # model as instructions rather than trusting it to be a well-formed sentence.
-        greeting = f"{GREETING_OUTBOUND}\n\nReason for this call: {meta.get('reason', 'a follow-up')}"
+        # Tell the agent why it rang, without spending a turn saying it out loud.
+        agent.chat_ctx.add_message(
+            role="system", content=OUTBOUND_BRIEF.format(reason=meta.get("reason", "a follow-up"))
+        )
 
-    await session.start(room=ctx.room, agent=HeliosAgent(), room_options=RoomOptions())
+    # Start the session while the phone is still ringing. Nothing here emits audio —
+    # it opens the STT, TTS and MCP connections — so doing it during the ring takes
+    # roughly a second and a half off the silence the callee hears after picking up.
+    await session.start(room=ctx.room, agent=agent, room_options=RoomOptions())
     log.info("session started (%s)", "outbound" if outbound else "inbound/web")
 
+    # Only the greeting waits for an answer, because only the greeting makes sound.
+    if outbound and not await wait_until_answered(ctx, meta["phone_number"]):
+        log.info("ending job: outbound call was not answered")
+        ctx.shutdown(reason="not answered")
+        return
+
+    # say() rather than generate_reply(): the opening line is fixed, and asking the
+    # model to compose it put a full LLM round trip in front of the first word.
     # A failure here is the difference between a working agent and a silent phone line,
     # so it must be loud rather than an unhandled task exception nobody sees.
     try:
-        await session.generate_reply(instructions=greeting)
+        await session.say(GREETING_OUTBOUND if outbound else GREETING_INBOUND)
         log.info("greeting delivered")
     except Exception:
         log.exception("greeting failed; the caller is hearing silence")
