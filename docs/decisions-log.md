@@ -200,3 +200,45 @@ answer. The agent reads the metadata on connect and switches to the outbound gre
 **The account is a Twilio trial**, with one verified number (`+917075400204`) and $14.35 of
 credit. Inbound is only accepted from verified numbers and outbound can only reach them,
 which is a property of the account rather than of this code. Upgrading lifts both limits.
+
+## Live call tuning — what fixed the silence, and what cannot be fixed in code
+
+A real call reported four to ten seconds of silence after picking up, then two to four
+seconds between speaking and hearing a reply.
+
+**The opening silence was 5.2 s and is now 1.64 s**, measured pickup (`sip.callStatus`
+goes `active`) to the first word.
+
+Two causes. The greeting was composed by the LLM, which put a full model round trip in
+front of the first word; the opening line is fixed, so it now goes straight to TTS via
+`session.say`. The reason for an outbound call moved into the agent's instructions
+instead, since an Agent's `chat_ctx` is read-only and appending to it crashed a live call.
+
+**One optimisation had to be reverted.** Starting the session during the ring looked
+free, because nothing in `session.start` emits audio. It killed the worker process
+outright on two consecutive live calls: the log ends mid-line with no Python traceback,
+which is a native crash rather than an exception. The one call that worked started the
+session after the answer. Correlation across four calls is unambiguous, so the session is
+started only once media is up. That costs about 1.3 s and buys a call that does not drop.
+
+**Per-turn latency is network, not configuration.** Measured over a real call:
+
+| Stage | p50 |
+|---|---:|
+| End-of-utterance | 744 ms |
+| Transcription | 564 ms |
+| LLM first token | 708 ms |
+| TTS first byte | 114 ms |
+| Time to first audio | 1666 ms |
+
+Benchmarked against the real system prompt, six tool schemas and a mid-call history,
+`qwen/qwen3.8-27b` at 708 ms is already the fastest model available on the account:
+`gpt-oss-20b` is 793 ms and `gpt-oss-120b` is 916 ms. Removing every tool schema saves
+65 ms, and shortening the system prompt saves about 35 ms on an unreliable sample.
+Neither is worth the capability.
+
+Set against measured RTT from this machine — Groq 423 ms, Deepgram 1115 ms — roughly
+60 percent of the LLM stage and nearly all of the transcription stage is distance. The
+agent runs in India; the providers are in the United States. Running the worker beside
+them should put time-to-first-audio near 730 ms. That is a deployment change, and it is
+the only remaining lever of any size.

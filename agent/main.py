@@ -60,9 +60,9 @@ def prewarm(proc: JobProcess) -> None:
 
 
 class HeliosAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, extra_instructions: str = "") -> None:
         super().__init__(
-            instructions=SYSTEM_PROMPT,
+            instructions=SYSTEM_PROMPT + extra_instructions,
             # The tool server is a separate process; give it room to cold-start without
             # the first caller hearing dead air.
             tools=[
@@ -109,6 +109,7 @@ async def wait_until_answered(
         log.warning("no SIP participant joined within %.0fs", timeout)
         return False
 
+    identity = participant.identity
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     # sip.callStatus has been reported empty on some deployments. If it never appears,
@@ -117,6 +118,10 @@ async def wait_until_answered(
     last = None
 
     while loop.time() < deadline:
+        # Re-read from the room each poll. The SDK does update the participant object in
+        # place, so this is belt and braces rather than a fix, but it costs a dict lookup
+        # and removes any doubt about holding a stale reference.
+        participant = ctx.room.remote_participants.get(identity) or participant
         status = participant.attributes.get(SIP_STATUS_ATTR)
         if status != last:
             log.info("sip.callStatus=%s", status)
@@ -166,30 +171,34 @@ async def entrypoint(ctx: JobContext) -> None:
         metrics.log_metrics(ev.metrics)
         sink.ingest(ev.metrics)
 
-    agent = HeliosAgent()
+    # Tell the agent why it rang, without spending a turn saying it out loud. This goes
+    # into instructions rather than chat_ctx: an Agent's chat context is read-only, and
+    # appending to it crashed a live call.
+    brief = ""
     if outbound:
-        # Tell the agent why it rang, without spending a turn saying it out loud.
-        agent.chat_ctx.add_message(
-            role="system", content=OUTBOUND_BRIEF.format(reason=meta.get("reason", "a follow-up"))
-        )
+        brief = "\n\n" + OUTBOUND_BRIEF.format(reason=meta.get("reason", "a follow-up"))
+    agent = HeliosAgent(extra_instructions=brief)
 
-    # Start the session while the phone is still ringing. Nothing here emits audio —
-    # it opens the STT, TTS and MCP connections — so doing it during the ring takes
-    # roughly a second and a half off the silence the callee hears after picking up.
-    await session.start(room=ctx.room, agent=agent, room_options=RoomOptions())
-    log.info("session started (%s)", "outbound" if outbound else "inbound/web")
-
-    # Only the greeting waits for an answer, because only the greeting makes sound.
+    # Wait for the answer BEFORE starting the session. Starting it during the ring looked
+    # like free latency — nothing in session.start emits audio — but it killed the worker
+    # process outright on two consecutive live calls: the log ends mid-line with no Python
+    # traceback, which is a native crash in the audio pipeline being wired up against a
+    # half-established SIP media path. The one call that worked started the session after
+    # the answer. A second and a half is not worth a dropped call.
     if outbound and not await wait_until_answered(ctx, meta["phone_number"]):
         log.info("ending job: outbound call was not answered")
         ctx.shutdown(reason="not answered")
         return
+
+    await session.start(room=ctx.room, agent=agent, room_options=RoomOptions())
+    log.info("session started (%s)", "outbound" if outbound else "inbound/web")
 
     # say() rather than generate_reply(): the opening line is fixed, and asking the
     # model to compose it put a full LLM round trip in front of the first word.
     # A failure here is the difference between a working agent and a silent phone line,
     # so it must be loud rather than an unhandled task exception nobody sees.
     try:
+        log.info("speaking the greeting now")
         await session.say(GREETING_OUTBOUND if outbound else GREETING_INBOUND)
         log.info("greeting delivered")
     except Exception:

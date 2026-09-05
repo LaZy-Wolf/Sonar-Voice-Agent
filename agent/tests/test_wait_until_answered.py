@@ -20,6 +20,8 @@ class FakeParticipant:
     asyncio.sleep: patching that globally corrupted every other test in the suite.
     """
 
+    identity = "sip-callee"
+
     def __init__(self, statuses: list[str | None]):
         self._statuses = statuses
         self._i = 0
@@ -31,11 +33,19 @@ class FakeParticipant:
         return {} if value is None else {main.SIP_STATUS_ATTR: value}
 
 
+class FakeRoom:
+    def __init__(self, participant):
+        self.remote_participants = {"sip-callee": participant} if participant else {}
+
+
 class FakeCtx:
-    def __init__(self, participant, *, join_delay: float = 0.0, never_joins: bool = False):
+    """The gate re-reads the participant from the room on every poll, so the fake has
+    to provide one: reusing the returned snapshot is the bug this guards against."""
+
+    def __init__(self, participant, *, never_joins: bool = False):
         self._participant = participant
-        self._join_delay = join_delay
         self._never_joins = never_joins
+        self.room = FakeRoom(participant)
 
     async def wait_for_participant(self, *, kind=None, identity=None):
         if self._never_joins:
@@ -89,6 +99,8 @@ class FakeTrackPub:
 
 class SilentParticipant:
     """No sip.callStatus at all, which some deployments have been reported to produce."""
+
+    identity = "sip-callee"
 
     def __init__(self, with_audio: bool):
         from livekit import rtc
