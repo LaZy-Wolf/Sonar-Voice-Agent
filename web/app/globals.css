@@ -1,79 +1,136 @@
 @import "tailwindcss";
 
-/* An instrument panel, not a landing page: you watch these numbers move while you
-   talk, so the surface stays dark and the accent is spent only on live state. */
+/* A broadcast desk under a low top light. The panel is the ground; the meter faces are
+   the only light source in the room. No blue appears anywhere in this system: the whole
+   category ships navy with a cyan glow, and the hue channel here sits in the greens so
+   the graphite reads as warm machine grey instead. */
 @theme {
-  --color-ink-950: oklch(16% 0.008 65);
-  --color-ink-900: oklch(20% 0.009 65);
-  --color-ink-850: oklch(24% 0.010 65);
-  --color-ink-800: oklch(29% 0.011 65);
-  /* 52% measured 3.52:1 on the page background, under the 4.5:1 body minimum. */
-  --color-ink-600: oklch(63% 0.013 65);
-  --color-ink-400: oklch(69% 0.010 65);
-  --color-ink-200: oklch(88% 0.008 65);
-  --color-ink-50: oklch(96% 0.006 65);
+  --color-panel-900: oklch(21% 0.008 128);
+  --color-panel-800: oklch(26% 0.008 128);
+  --color-panel-700: oklch(31% 0.009 128);
+  --color-engrave: oklch(38% 0.010 128);
+  --color-legend: oklch(74% 0.010 120);
+  /* 60% measured 3.92:1 on a raised panel, under the 4.5:1 body minimum. */
+  --color-legend-dim: oklch(68% 0.010 120);
 
-  /* One accent, from the domain: sunlight on a panel. */
-  --color-solar-400: oklch(80% 0.155 72);
-  --color-solar-500: oklch(72% 0.170 66);
+  /* Meter faces: warm ivory, lit from inside. */
+  --color-face: oklch(93% 0.024 88);
+  --color-face-ink: oklch(28% 0.030 60);
 
-  --color-under: oklch(72% 0.150 155);
-  --color-over: oklch(68% 0.170 32);
+  /* Colour is law. Amber is live or actionable, red is past target, nothing else on the
+     page is ever coloured. An amber element you cannot act on is a bug. */
+  --color-signal: oklch(76% 0.150 68);
+  --color-signal-dim: oklch(62% 0.120 68);
+  /* Red carries text as well as meter marks, so it is lifted to clear 4.5:1. */
+  --color-over: oklch(68% 0.175 27);
 
-  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --font-body: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-legend: var(--font-legend), ui-sans-serif, system-ui, sans-serif;
+  --font-figure: var(--font-figure), ui-monospace, monospace;
+
+  --ease-settle: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 html {
   color-scheme: dark;
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--color-ink-950);
-  color: var(--color-ink-200);
+  background: var(--color-panel-900);
+  color: var(--color-legend);
   -webkit-font-smoothing: antialiased;
 }
 
-/* Latency figures are compared column-to-column; they must not shimmy as they update. */
-.tnum {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+/* The parts nobody draws still carry the design. */
+::selection {
+  background: var(--color-signal);
+  color: oklch(20% 0.02 70);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-engrave) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-engrave);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Panel legends are engraved, not typeset. */
+.legend {
+  font-family: var(--font-legend);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+}
+
+.figure {
+  font-family: var(--font-figure);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+/* Raised panel: a light top edge and a darker bottom edge, the way a milled face catches
+   a lamp above it. Not a card floating on a drop shadow. */
+.raised {
+  background: var(--color-panel-800);
+  box-shadow:
+    inset 0 1px 0 oklch(45% 0.010 128),
+    inset 0 -1px 0 oklch(16% 0.006 128),
+    0 1px 2px oklch(12% 0.004 128 / 0.6);
 }
 
-.rise {
-  animation: rise 0.24s var(--ease-out-strong) both;
+/* Hairline scoring between sections of the desk. */
+.scored {
+  border-top: 1px solid var(--color-engrave);
 }
 
-@keyframes pulse-ring {
-  0%, 100% { opacity: 0.9; }
-  50% { opacity: 0.35; }
+/* Sections rise into place with mass rather than fading on the spot. */
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 0.5s var(--ease-settle),
+    transform 0.5s var(--ease-settle);
 }
 
-.live-dot {
-  animation: pulse-ring 1.8s var(--ease-out-strong) infinite;
+.reveal[data-shown="true"] {
+  opacity: 1;
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise {
-    animation: none;
+  html {
+    scroll-behavior: auto;
   }
-  .live-dot {
-    animation: none;
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
+
   *,
   *::before,
   *::after {
+    animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
 }

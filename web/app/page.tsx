@@ -3,10 +3,10 @@
 import { RoomAudioRenderer, RoomContext, StartAudio } from "@livekit/components-react";
 import { ConnectionState, Room, RoomEvent } from "livekit-client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CallPanel } from "@/components/CallPanel";
-import { DialOut } from "@/components/DialOut";
-import { LatencyHud } from "@/components/LatencyHud";
-import { Transcript } from "@/components/Transcript";
+import { ChannelStrips } from "@/components/ChannelStrips";
+import { MasterSection } from "@/components/MasterSection";
+import { Colophon, PatchBay, RoomTone, TrunkLine } from "@/components/sections";
+import { Talkback } from "@/components/Talkback";
 
 export default function Home() {
   const room = useMemo(() => new Room({ adaptiveStream: true, dynacast: true }), []);
@@ -37,16 +37,16 @@ export default function Home() {
       if (!res.ok) throw new Error("Could not get a token from the server.");
       const { token, url } = (await res.json()) as { token: string; url: string };
       await room.connect(url, token);
-      // Publishing the mic is what triggers the browser permission prompt, so it has
-      // to happen inside the click handler to count as a user gesture.
+      // Publishing the mic is what triggers the permission prompt, so it has to happen
+      // inside the click handler to count as a user gesture.
       await room.localParticipant.setMicrophoneEnabled(true);
       setMicMuted(false);
     } catch (e) {
       setConnection(ConnectionState.Disconnected);
       setError(
         e instanceof Error && e.name === "NotAllowedError"
-          ? "Microphone access was blocked. Allow it and try again."
-          : "Could not start the call. Check that the agent worker is running.",
+          ? "Microphone access was blocked. Allow it in your browser and try again."
+          : "Could not start the call. The agent worker may not be running.",
       );
     }
   }, [room]);
@@ -68,23 +68,21 @@ export default function Home() {
       <RoomAudioRenderer />
       <StartAudio label="Tap to enable audio" className="sr-only" />
 
-      <main className="mx-auto grid min-h-dvh max-w-6xl grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
-        <div className="border-ink-850 lg:border-r">
-          <CallPanel
-            connection={connection}
-            micMuted={micMuted}
-            onStart={start}
-            onEnd={end}
-            onToggleMic={toggleMic}
-            error={error}
-          />
-        </div>
-
-        <div className="flex min-h-0 flex-col divide-y divide-ink-850 border-t border-ink-850 lg:border-t-0">
-          <LatencyHud />
-          <Transcript agentIdentity={agentIdentity} />
-          <DialOut />
-        </div>
+      <main>
+        <MasterSection
+          connection={connection}
+          micMuted={micMuted}
+          onStart={start}
+          onEnd={end}
+          onToggleMic={toggleMic}
+          error={error}
+        />
+        <ChannelStrips />
+        <Talkback agentIdentity={agentIdentity} />
+        <PatchBay />
+        <TrunkLine />
+        <RoomTone />
+        <Colophon />
       </main>
     </RoomContext.Provider>
   );
