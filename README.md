@@ -1,5 +1,12 @@
 # SONAR
 
+[![ci](https://github.com/LaZy-Wolf/Sonar-Voice-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/LaZy-Wolf/Sonar-Voice-Agent/actions/workflows/ci.yml)
+
+**Live demo: [sonar-voice-agent.vercel.app](https://sonar-voice-agent.vercel.app).** Click
+*Start talking* and your browser asks for the microphone. The agent runs on LiveKit Cloud's
+free plan, which shuts an idle agent down, so the first visitor after a quiet spell waits
+10 to 20 seconds for it to join.
+
 A real-time, interruptible voice agent that answers the phone. It is the front desk for
 Helios Solar, a fictional rooftop installer: it looks customers up, answers questions
 from a knowledge base, checks a calendar and books site visits. You can reach it from a
@@ -13,7 +20,7 @@ Browser (Next.js) ──WebRTC──┐
                              ├─► LiveKit room ◄──► agent worker
 PSTN ──► Twilio SIP trunk ───┘                      │
                                                     ├─► Deepgram nova-3   (speech to text, streaming)
-                                                    ├─► Groq qwen3.8-27b  (with NVIDIA Nemotron behind it)
+                                                    ├─► Groq gpt-oss-20b   (with NVIDIA Nemotron behind it)
                                                     ├─► Cartesia Sonic    (text to speech)
                                                     └─► MCP server ──► SQLite
 ```
@@ -36,8 +43,8 @@ Regenerate with `make report-md`; the full table is in
 | TTS first byte | 129 ms | 195 ms | 150 ms | yes |
 | **Time to first audio** | **1299 ms** | **1473 ms** | 900 ms | no |
 
-The model stages hit their targets. Hearing the caller does not, and the reason is
-geography rather than configuration. Round-trip from the machine running the agent:
+The model stages hit their targets. Hearing the caller does not. Round-trip from the machine
+running the agent:
 
 | Provider | median RTT |
 |---|---:|
@@ -46,12 +53,25 @@ geography rather than configuration. Round-trip from the machine running the age
 | Deepgram | 1115 ms |
 | Cartesia | 1853 ms |
 
-Deepgram and Cartesia have no region near India. End-of-utterance cannot resolve until
-the final transcript arrives, so it trails transcription by about 180 ms and inherits
-that distance. Halving `min_endpointing_delay` from 400 ms to 200 ms moved
-end-of-utterance by 10 ms, which is how the constraint was identified: it was never the
-delay. Running the worker next to the providers would close most of the gap, which is a
-deployment choice rather than a code change.
+Deepgram and Cartesia have no region near India, and halving `min_endpointing_delay` from
+400 ms to 200 ms moved end-of-utterance by only 10 ms. That made distance the obvious
+suspect, so the agent was deployed to `us-east`, beside the providers. Five turns there:
+
+| Stage | India (laptop) | us-east (LiveKit Cloud) |
+|---|---:|---:|
+| End-of-utterance | 634 ms | 753 ms |
+| LLM first token | 492 ms | 312 ms |
+| TTS first byte | 129 ms | 167 ms |
+| **Time to first audio** | **1299 ms** | **1225 ms** |
+
+The model got faster, as predicted. Hearing did not, which falsifies the diagnosis: with the
+agent next to Deepgram, end-of-utterance rose. The cause is still open. The two candidates
+are turn-detector inference on the cloud's 2 vCPU against the laptop's 8 cores, and
+endpointing changes in livekit-agents 1.8.1, which the cloud build resolved. The earlier
+prediction of about 730 ms was wrong.
+
+These are agent-side numbers. A caller in India now also sends their audio across an ocean
+and back, which no stage metric counts.
 
 ## Design decisions
 
@@ -62,6 +82,13 @@ repeatedly on the second call of a turn, the one carrying a tool result back to 
 model. In one live call that cost 5.6 seconds of silence. Groq's `qwen3.8-27b` measured
 355 ms median, 456 ms worst, with no failures across every run. On a phone call the p95
 is what people hang up on, so Groq leads and Nemotron covers Groq's rate limits.
+
+**The Groq model is now `gpt-oss-20b`, chosen on tool use rather than speed.** Pinning
+`qwen3.8-27b` to a low temperature made it announce "let me get the details for you" without
+ever calling a tool, so the caller heard a promise and then silence. At its default
+temperature it did call tools, but spoke a preamble first. `gpt-oss-20b` searched the
+knowledge base silently and answered from it in six of six full turns, with
+`reasoning_effort` set low to keep its hidden reasoning to 7 to 19 tokens.
 
 **The fallback chain is load-bearing, not decorative.** It has fired during real calls
 and rescued turns. `attempt_timeout` is 2.5 s rather than the 5 s default, because five
@@ -88,7 +115,8 @@ callers into the same conversation.
   reply is grounded in the knowledge base. It fails on a wrong answer, not merely on a
   dead process. It also subscribes to the metrics topic and checks every field the
   browser latency panel reads.
-- 46 unit tests over the tools, the settings and the metrics aggregation.
+- 55 unit tests over the tools, the settings, the metrics aggregation and the outbound
+  answer gate.
 
 ```bash
 make test
@@ -115,6 +143,35 @@ For telephony, once the Twilio values are set:
 ```bash
 make sip
 ```
+
+## Deploying
+
+The agent and the web page deploy separately.
+
+**Agent, to LiveKit Cloud.** The repo root holds the `Dockerfile` and `livekit.toml`. Provider
+keys go in as LiveKit secrets, from a file holding only what the agent reads. Never include
+`LIVEKIT_*`, which LiveKit injects itself:
+
+```bash
+lk agent deploy --region us-east --secrets-file agent-secrets.env .
+```
+
+`us-east` puts the agent beside Deepgram, Groq and Cartesia. LiveKit requires the container to
+launch only the agent, so the MCP tool server runs as a stdio child rather than a second
+service.
+
+**Web, to Vercel**, from `web/`:
+
+```bash
+vercel deploy --prod
+```
+
+with `LIVEKIT_URL`, `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` set on the project. Dial-out is
+off in production: `/api/call` returns 403 unless `DIAL_OUT_ENABLED=1`, because a public
+dial-out endpoint would let anyone ring numbers on the Twilio account.
+
+The worker uses automatic dispatch, so a local `python main.py dev` competes with the
+deployed agent for rooms. Stop it whenever the deployed agent should be answering.
 
 ## Costs
 

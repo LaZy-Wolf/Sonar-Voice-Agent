@@ -42,7 +42,14 @@ class Settings(BaseSettings):
     cartesia_voice: str = ""
 
     groq_api_key: str = ""
-    groq_llm_model: str = "qwen/qwen3.8-27b"
+    # gpt-oss calls tools silently and answers from what they return. qwen3.8-27b, the
+    # previous choice, announced "let me check" without calling a tool at temperature 0.3,
+    # and spoke a preamble first at its default. Measured; see docs/decisions-log.md.
+    groq_llm_model: str = "openai/gpt-oss-20b"
+    # gpt-oss reasons before answering. "low" kept it to 7-19 tokens per request in testing,
+    # and every reasoning token costs latency and counts against the output cap. Set this
+    # empty for a Groq model that does not accept reasoning_effort.
+    groq_reasoning_effort: str = "low"
 
     # Empty spawns the tool server over stdio, which is what the deployed image does.
     mcp_server_url: str = ""
@@ -50,9 +57,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     worker_http_port: int = 8081
 
-    # Voice replies are short by construction; this is a backstop against a model that
-    # ignores the prompt and monologues down the phone.
-    max_reply_tokens: int = 400
+    # Caps every LLM reply. Voice replies are two sentences, so this is a backstop, and it is
+    # also a rate-limit budget: Groq's free tier allows 1,000 output tokens per minute and
+    # reserves each request's full cap up front. Uncapped, one request asked for 1,237 and
+    # was refused outright; at 400, two requests per turn still starved the minute.
+    max_reply_tokens: int = 200
     # Seconds a provider gets to produce its first token before the chain moves on.
     llm_attempt_timeout: float = 2.5
     # Floor on how long to wait after speech stops before deciding the turn is over.
@@ -105,7 +114,15 @@ def build_llm() -> _llm.LLM:
     """
     chain = []
     if settings.groq_api_key:
-        chain.append(groq.LLM(model=settings.groq_llm_model, api_key=settings.groq_api_key))
+        chain.append(
+            groq.LLM(
+                model=settings.groq_llm_model,
+                api_key=settings.groq_api_key,
+                temperature=0.3,
+                max_completion_tokens=settings.max_reply_tokens,
+                reasoning_effort=settings.groq_reasoning_effort or openai.NOT_GIVEN,
+            )
+        )
     if settings.nvidia_api_key:
         chain.append(_nemotron())
     if not chain:

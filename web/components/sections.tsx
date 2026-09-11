@@ -207,14 +207,15 @@ export function RoomTone() {
           id="tone-heading"
           className="max-w-[24ch] text-[clamp(1.5rem,3.2vw,2.25rem)] font-semibold leading-tight tracking-[-0.02em] text-face"
         >
-          It misses its target, and the reason is distance.
+          It misses its target. Moving closer fixed the model, not the hearing.
         </h2>
         <p className="mt-4 max-w-[64ch] text-sm leading-relaxed text-legend">
-          Thinking and speaking meet their budgets. Hearing does not. End-of-utterance
-          cannot resolve until the final transcript arrives, and the transcript comes from
-          the United States while the agent runs in India. Halving the endpointing delay
-          moved it by ten milliseconds, which is how the constraint was identified: it was
-          never the setting.
+          Thinking and speaking meet their budgets. Hearing does not. With the agent on a
+          laptop in India and every provider in the United States, distance looked like the
+          cause, so the agent was moved to us-east, beside them. The model&apos;s first token
+          fell from 492 to 312 milliseconds. End-of-utterance rose, from 634 to 753.
+          Distance was not what held hearing back, and the real cause is still being
+          isolated. Round trips measured from the laptop, for the record:
         </p>
 
         <ul className="mt-10 flex flex-col gap-3">
@@ -237,9 +238,8 @@ export function RoomTone() {
         </ul>
 
         <p className="mt-8 max-w-[64ch] text-sm leading-relaxed text-legend-dim">
-          Running the worker beside the providers should put time to first audio near
-          730 ms. That is a deployment change, not a code change, and it is the only
-          remaining lever of any size.
+          Time to first audio in us-east: 1225 ms at p50 over five turns, against 1299 ms
+          from India. The earlier prediction was about 730 ms, and it was wrong.
         </p>
       </div>
     </section>
@@ -251,7 +251,7 @@ export function RoomTone() {
 const STACK = [
   ["Transport", "LiveKit · WebRTC and SIP"],
   ["Speech to text", "Deepgram nova-3, streaming"],
-  ["Model", "Groq qwen3.8-27b, NVIDIA Nemotron behind it"],
+  ["Model", "Groq gpt-oss-20b, NVIDIA Nemotron behind it"],
   ["Text to speech", "Cartesia Sonic"],
   ["Tools", "MCP over SQLite"],
   ["Telephony", "Twilio SIP trunk, both directions"],

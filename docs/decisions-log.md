@@ -242,3 +242,98 @@ Set against measured RTT from this machine — Groq 423 ms, Deepgram 1115 ms —
 agent runs in India; the providers are in the United States. Running the worker beside
 them should put time-to-first-audio near 730 ms. That is a deployment change, and it is
 the only remaining lever of any size.
+
+## Deployment — what moving to us-east actually did
+
+The agent now runs on LiveKit Cloud in `us-east`, beside Deepgram, Groq and Cartesia. The
+bet was that distance explained the missed budget. Five turns measured against the cloud
+agent, with no local worker running so nothing else could answer:
+
+| Stage | India (laptop) | us-east |
+|---|---:|---:|
+| End-of-utterance | 634 ms | 753 ms |
+| LLM first token | 492 ms | 312 ms |
+| TTS first byte | 129 ms | 167 ms |
+| Time to first audio | 1299 ms | 1225 ms |
+
+**The prediction of about 730 ms was wrong.** The model stage improved as expected. Hearing
+got worse, which falsifies the earlier claim that end-of-utterance was gated by distance to
+Deepgram: sitting next to Deepgram, it rose. The cause is open. Candidates are turn-detector
+inference on the cloud's 2 vCPU against the laptop's 8 cores, and endpointing behaviour in
+livekit-agents 1.8.1, which the remote build resolved while the laptop ran 1.7.1. The laptop
+has since been aligned to 1.8.1 so the two can be separated.
+
+**The deployed agent was being rate limited, and the metrics hid it.** Groq's free tier
+allows `qwen/qwen3.8-27b` 1,000 output tokens per minute, organisation-wide, and reserves
+each request's full `max_tokens` up front. Groq was the one provider sent without a cap, so
+one request asked for 1,237 tokens and was refused outright ("Request too large"). A voice
+turn with a tool call makes two requests, so the minute starved almost immediately. NVIDIA,
+the fallback, answered from us-east with "Service temporarily overloaded" and timeouts, and
+three of five turns logged `all LLMs failed ... retrying`.
+
+None of that reached the latency numbers. `LLMMetrics.ttft` describes only the attempt that
+succeeded, so a turn that spent seconds failing over still reports a healthy
+time-to-first-audio. That is a real limitation of the published figures.
+
+Fix: every LLM reply is capped at 200 output tokens, where the longest real reply uses about
+90, and Groq's temperature is pinned at 0.3 as Nemotron's already was. At the default
+temperature the model twice skipped the knowledge base on a warranty question: once refusing
+("I can't give you the exact warranty period without checking my latest records") and once
+answering from memory. Tool setup was checked and ruled out as a cause, since livekit awaits
+it before the session goes live.
+
+Even capped, the limit is shared by everything on the account. That is roughly two or three
+voice turns a minute across every visitor, so a public demo with simultaneous visitors will
+still queue. Groq's paid Dev Tier removes the ceiling.
+
+## Tool use — why the Groq model is now gpt-oss-20b
+
+**A temperature pin broke tool calling.** The rate-limit fix above also pinned Groq's
+temperature at 0.3. On `qwen/qwen3.8-27b` that made the model promise a lookup ("let me get
+the details for you") and then call nothing, so the caller hears a promise followed by
+silence. Replayed against the real system prompt and all six tool schemas, on the warranty
+and 5 kW price questions:
+
+| Model | Setting | What it did, both questions |
+|---|---|---|
+| `qwen3.8-27b` | temperature 0.3 | announced a lookup, called no tool |
+| `qwen3.8-27b` | default temperature | called the tool, after speaking a preamble |
+| `gpt-oss-20b` | temperature 0.3 | called the tool, said nothing first |
+
+**The smoke test could not tell these apart.** It judged a reply by the first line
+transcribed, so a turn that acknowledged and then answered correctly failed exactly like a
+turn that acknowledged and went silent. It now keeps listening until the agent has been
+quiet for six seconds and judges the whole turn.
+
+**`gpt-oss-20b` runs at `reasoning_effort` low.** It reasons before answering, and every
+reasoning token is spent inside the 200-token cap. At low effort it used 7 reasoning tokens
+per call and answered both questions from the knowledge base. At the default effort it used
+up to 19; on two samples the latency difference was noise.
+
+**In production**, three turns against the us-east agent with no local worker running:
+
+| Question | Grounded | Tool call, first token | Answer, first token | End-of-utterance | Reported time to first audio |
+|---|:--:|---:|---:|---:|---:|
+| Panel warranty | yes | 0.53 s | 461 ms | 818 ms | 1473 ms |
+| 5 kW price | yes | 0.44 s | 300 ms | 794 ms | 1261 ms |
+| Financing | yes | 0.20 s | 214 ms | 799 ms | 1180 ms |
+
+All six model calls were served by Groq's `openai/gpt-oss-20b`. The container logged no rate
+limiting and no failover.
+
+**The reported time to first audio leaves out the tool call.** A turn that uses a tool makes
+two model calls under one `speech_id`, and the metrics sink keeps only the last `llm_ttft`,
+which belongs to the second call, the answer. The first call, which decides to use the tool,
+and the tool itself both finish before any audio, and neither is counted. The tool-call
+column above is a lower bound on the missing time, since it is first token rather than
+completion. Every published time to first audio for a tool turn is low by at least that
+much. This joins the failover blind spot above. The smoke test's own audio-based estimate
+printed 28, −33 and −35 ms for these turns, which is impossible, so it is no cross-check
+until it is fixed either.
+
+**The worker reports itself full during a single call.** While each smoke call ran, the
+worker logged "worker is at full capacity, marking as unavailable" at loads of 0.82 to 0.85
+against a threshold of 0.7, falling back to 0.31 to 0.46 afterwards. One conversation uses
+most of the two vCPUs. A worker marked unavailable is not offered new jobs; whether the free
+plan's single replica then scales out is untested. The same reading is evidence, not proof,
+for the turn-detector explanation of end-of-utterance, which measured 794 to 818 ms here.

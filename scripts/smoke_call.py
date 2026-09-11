@@ -181,8 +181,16 @@ async def main(question: str) -> int:
             line for line in transcript[greeting_lines:] if "smoke-caller" not in line
         ).strip()
 
-    deadline = time.perf_counter() + 40
+    deadline = time.perf_counter() + 45
     while time.perf_counter() < deadline and not agent_reply():
+        await asyncio.sleep(0.2)
+
+    # A reply can arrive in parts: an acknowledgement, then the answer once a tool returns.
+    # Judge the whole turn, not its first sentence, so keep listening until it goes quiet.
+    last_len, quiet_since = len(transcript), time.perf_counter()
+    while time.perf_counter() < deadline and time.perf_counter() - quiet_since < 6:
+        if len(transcript) != last_len:
+            last_len, quiet_since = len(transcript), time.perf_counter()
         await asyncio.sleep(0.2)
 
     reply = agent_reply()

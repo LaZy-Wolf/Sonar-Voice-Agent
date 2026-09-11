@@ -44,11 +44,13 @@ These are measured, not claimed, and must not be rounded up or dramatised.
   phone call.
 - Stage p50s in the browser: end-of-utterance 634 ms, transcription 508 ms, LLM first
   token 492 ms, TTS first byte 129 ms.
-- The model and speech stages meet target. Hearing the caller does not, because the agent
-  runs in India and the providers are in the United States: measured RTT is Deepgram
-  1115 ms, Cartesia 1853 ms, Groq 423 ms, NVIDIA 106 ms.
+- The model and speech stages meet target. Hearing the caller does not. Distance was the
+  first suspect (from India, RTT is Deepgram 1115 ms, Cartesia 1853 ms, Groq 423 ms,
+  NVIDIA 106 ms), but moving the agent to us-east beside the providers made
+  end-of-utterance worse, 634 to 753 ms, while the model got faster, 492 to 312 ms. The
+  cause of the hearing delay is open. Never present distance as the explanation.
 - Pickup to first spoken word on an outbound call: **1.64 s**, down from 5.2 s.
-- Stack: Deepgram nova-3 streaming STT, Groq `qwen/qwen3.8-27b` with NVIDIA Nemotron as
+- Stack: Deepgram nova-3 streaming STT, Groq `openai/gpt-oss-20b` with NVIDIA Nemotron as
   fallback, Cartesia Sonic TTS, six MCP tools over SQLite, Twilio SIP both directions.
 - Nemotron was the intended brain and was demoted on measurement: 597 ms median TTFT
   against a 5203 ms worst case. That decision is a feature of the story, not an apology.
