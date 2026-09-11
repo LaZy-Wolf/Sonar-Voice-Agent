@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_llm_model: str = "qwen/qwen3.8-27b"
 
-    mcp_server_url: str = "http://localhost:8811/mcp"
+    # Empty spawns the tool server over stdio, which is what the deployed image does.
+    mcp_server_url: str = ""
     metrics_jsonl: str = "./data/turns.jsonl"
     log_level: str = "INFO"
     worker_http_port: int = 8081

@@ -11,6 +11,15 @@ export async function POST(request: Request) {
   const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, SONAR_OUTBOUND_TRUNK_ID } =
     process.env;
 
+  // Dial-out places real, paid calls. It is off unless explicitly enabled, so a public
+  // deployment cannot be used to ring arbitrary numbers on this Twilio account.
+  if (process.env.DIAL_OUT_ENABLED !== "1") {
+    return NextResponse.json(
+      { error: "Dial-out is switched off on this deployment: it places real, paid calls." },
+      { status: 403 },
+    );
+  }
+
   if (!LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
     return NextResponse.json({ error: "LiveKit is not configured." }, { status: 500 });
   }

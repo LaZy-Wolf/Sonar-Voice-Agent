@@ -8,6 +8,7 @@ livekit-agents supports 2.x.
 from __future__ import annotations
 
 import os
+import sys
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -29,4 +30,5 @@ for fn in ALL_TOOLS:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    # stdio when the agent spawns this (deployed); streamable-HTTP when run by hand.
+    mcp.run(transport="stdio" if "--stdio" in sys.argv else "streamable-http")

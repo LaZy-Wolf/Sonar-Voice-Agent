@@ -1,0 +1,6 @@
+# Never upload local env files. web/.env.local switches dial-out on for local use, and a
+# production deploy that picked it up would let anyone place real, paid calls.
+.env
+.env.*
+.next
+node_modules

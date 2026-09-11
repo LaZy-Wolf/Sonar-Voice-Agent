@@ -23,7 +23,7 @@ web:
 
 # Next.js does not read the repo-root .env, so mirror the LiveKit values into web/.env.local.
 web-env:
-	grep -E '^LIVEKIT_(URL|API_KEY|API_SECRET)=' .env > web/.env.local
+	grep -E '^(LIVEKIT_(URL|API_KEY|API_SECRET)|SONAR_OUTBOUND_TRUNK_ID|DIAL_OUT_ENABLED)=' .env > web/.env.local
 	@echo "wrote web/.env.local"
 
 test:

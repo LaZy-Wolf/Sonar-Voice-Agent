@@ -1,0 +1,28 @@
+# Build context for the agent image. Only agent/ and mcp-server/ are needed. LiveKit
+# caps the upload at 1 GB, and web/ alone is several hundred MB of node_modules.
+web/
+docs/
+scripts/
+.git/
+.github/
+.claude/
+.impeccable/
+
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+.venv/
+**/.venv/
+**/node_modules/
+**/tests/
+
+# Secrets never enter the image; they arrive as LiveKit Cloud secrets.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Local state. The image seeds its own database at build time.
+**/*.db
+agent/data/

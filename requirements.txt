@@ -1,0 +1,6 @@
+# What the deployed agent image installs; see Dockerfile. `lk agent deploy` identifies an
+# agent project by finding livekit-agents in a top-level project file, while the real
+# dependency lists live in agent/ and mcp-server/, so both are pulled in from here.
+livekit-agents[mcp]>=1.7,<2
+./mcp-server
+./agent

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -53,6 +54,27 @@ log = logging.getLogger("sonar")
 # LiveKit reports outbound call progress on the SIP participant under this key.
 SIP_STATUS_ATTR = "sip.callStatus"
 
+MCP_DIR = Path(__file__).resolve().parent.parent / "mcp-server"
+
+
+def _mcp_server() -> mcp.MCPServer:
+    """HTTP to a separately run tool server in local dev; a stdio child when deployed.
+
+    LiveKit Cloud requires the container to launch the agent directly, with no wrapper
+    script and no background processes, so there the agent spawns the tool server itself.
+    """
+    if settings.mcp_server_url:
+        return mcp.MCPServerHTTP(url=settings.mcp_server_url, client_session_timeout_seconds=30)
+    return mcp.MCPServerStdio(
+        command=sys.executable,
+        args=["-m", "sonar_tools.server", "--stdio"],
+        cwd=MCP_DIR,
+        # Given no env, the stdio client passes only a minimal environment, and the tool
+        # server needs to know where its database lives.
+        env={**os.environ, "SONAR_DB_PATH": str(MCP_DIR / "sonar.db")},
+        client_session_timeout_seconds=30,
+    )
+
 
 def prewarm(proc: JobProcess) -> None:
     """Load the VAD once per process, not once per call."""
@@ -68,9 +90,7 @@ class HeliosAgent(Agent):
             tools=[
                 mcp.MCPToolset(
                     id="sonar-tools",
-                    mcp_server=mcp.MCPServerHTTP(
-                        url=settings.mcp_server_url, client_session_timeout_seconds=30
-                    ),
+                    mcp_server=_mcp_server(),
                 )
             ],
         )
