@@ -5,6 +5,12 @@ LiveKit emits one metrics object per stage as it completes, each tagged with the
 turn, appends it to JSONL for the latency report, and publishes the same record on the
 room data channel so the browser can draw a live HUD.
 
+Time to first audio is measured, not added up. A turn that uses a tool makes two model
+calls, and the first call and the tool itself happen between the stages, so a sum of
+stages undercounted every tool turn. LiveKit times the whole wait, from the caller going
+quiet to the agent's first audio, and stamps it on the spoken reply as `e2e_latency`.
+That is the figure recorded.
+
 The published latency table comes from here, so the arithmetic is deliberately plain.
 """
 
@@ -30,15 +36,18 @@ MAX_PENDING = 32
 
 
 def _provider(label: str | None) -> str:
-    """'livekit.plugins.groq.services.LLM' -> 'groq'.
-
-    The plan expected provider attribution to be awkward. It is not: every metric
-    carries the plugin label, so which chain member served a turn is already known.
-    """
+    """'livekit.plugins.groq.services.LLM' -> 'groq'."""
     if not label:
         return "unknown"
     parts = label.split(".")
     return parts[2] if len(parts) > 2 and parts[0] == "livekit" else label
+
+
+def _llm_provider(m: lk.LLMMetrics) -> str:
+    """OpenRouter and NVIDIA are both reached through the openai plugin, so the label
+    calls both 'openai'. The endpoint host tells them apart."""
+    meta = getattr(m, "metadata", None)
+    return (meta.model_provider if meta else None) or _provider(m.label)
 
 
 def _ms(seconds: float | None) -> float | None:
@@ -79,9 +88,13 @@ class MetricsSink:
             if m.cancelled:
                 self._pending.pop(m.speech_id, None)
                 return None
-            self._slot(m.speech_id).update(
-                llm_provider=_provider(m.label),
+            slot = self._slot(m.speech_id)
+            # A tool turn makes two calls under one speech_id. The second, the answer, is
+            # the one whose first token feeds speech; counting calls makes tool turns show.
+            slot.update(
+                llm_provider=_llm_provider(m),
                 llm_ttft_ms=_ms(m.ttft),
+                llm_calls=slot.get("llm_calls", 0) + 1,
                 llm_completion_tokens=m.completion_tokens,
                 llm_tokens_per_s=round(m.tokens_per_second, 1) if m.tokens_per_second else None,
             )
@@ -99,6 +112,24 @@ class MetricsSink:
 
         return self._flush_if_complete(m.speech_id)
 
+    def ingest_reply(self, item: Any) -> dict[str, Any] | None:
+        """Take a conversation item. Returns the turn record if this completed a turn.
+
+        Only the agent's spoken replies count. LiveKit stamps each with `e2e_latency`, the
+        time from the caller going quiet to the agent's first audio, tool round included.
+        The greeting has none, since nobody spoke before it.
+        """
+        e2e = (getattr(item, "metrics", None) or {}).get("e2e_latency")
+        if getattr(item, "role", None) != "assistant" or e2e is None:
+            return None
+        # A reply carries no speech_id. Turns run one at a time, so it belongs to the most
+        # recent turn that has ended.
+        ended = [sid for sid, rec in self._pending.items() if "eou_delay_ms" in rec]
+        if not ended:
+            return None
+        self._pending[ended[-1]]["ttfa_ms"] = _ms(e2e)
+        return self._flush_if_complete(ended[-1])
+
     def _slot(self, speech_id: str) -> dict[str, Any]:
         if speech_id not in self._pending:
             if len(self._pending) >= MAX_PENDING:
@@ -108,30 +139,26 @@ class MetricsSink:
         return self._pending[speech_id]
 
     def _flush_if_complete(self, speech_id: str) -> dict[str, Any] | None:
-        """A turn is complete once we know when it ended, how fast it thought, and how
-        fast it started speaking. Anything less cannot produce a time-to-first-audio."""
+        """A turn is complete once every stage has reported and its reply has been spoken,
+        which is when LiveKit's end-to-end timing arrives. Anything less cannot say how
+        long the caller waited."""
         rec = self._pending.get(speech_id)
-        if not rec or not all(k in rec for k in ("eou_delay_ms", "llm_ttft_ms", "tts_ttfb_ms")):
+        if not rec or not all(
+            k in rec for k in ("eou_delay_ms", "llm_ttft_ms", "tts_ttfb_ms", "ttfa_ms")
+        ):
             return None
 
         del self._pending[speech_id]
         if self._last_stt:
             rec.update(self._last_stt)
 
-        # What the caller actually waits through: silence detected, model thinks, first
-        # audio leaves. Transcription overlaps end-of-utterance in LiveKit's pipeline, so
-        # adding it here would double-count; it is recorded separately instead.
-        rec["ttfa_estimate_ms"] = round(
-            rec["eou_delay_ms"] + rec["llm_ttft_ms"] + rec["tts_ttfb_ms"], 1
-        )
-
         self.turns.append(rec)
         self._write(rec)
         self._publish(rec)
         log.info(
-            "turn %s: ttfa %.0fms (eou %.0f + llm %.0f + tts %.0f) via %s",
-            speech_id[:8], rec["ttfa_estimate_ms"], rec["eou_delay_ms"],
-            rec["llm_ttft_ms"], rec["tts_ttfb_ms"], rec.get("llm_provider", "?"),
+            "turn %s: ttfa %.0fms (eou %.0f, llm %.0f on call %d, tts %.0f) via %s",
+            speech_id[:8], rec["ttfa_ms"], rec["eou_delay_ms"], rec["llm_ttft_ms"],
+            rec.get("llm_calls", 1), rec["tts_ttfb_ms"], rec.get("llm_provider", "?"),
         )
         return rec
 

@@ -40,21 +40,26 @@ That this is a working system, not a demo video. In order of weight:
 
 These are measured, not claimed, and must not be rounded up or dramatised.
 
-- Time to first audio: **p50 1299 ms, p95 1473 ms** in the browser; **p50 1666 ms** on a
-  phone call.
-- Stage p50s in the browser: end-of-utterance 634 ms, transcription 508 ms, LLM first
-  token 492 ms, TTS first byte 129 ms.
+- Time to first audio: **p50 1412 ms, p95 1487 ms** over five turns against the deployed
+  agent, timed by LiveKit from the caller going quiet to the agent's first audio frame. A
+  turn that calls a tool is 1475 ms at p50; one answered directly is 920 ms.
+- Stage p50s: end-of-utterance 772 ms, transcription 165 ms, LLM first token 312 ms, TTS
+  first byte 163 ms. The stages overlap and do not add up to the total, because the model
+  starts before the turn detector has decided. Never present the sum as the total.
+- The phone path has not been re-timed since the measurement was fixed. Its last figure,
+  1666 ms, was a sum of stages from India and is not comparable.
 - The model and speech stages meet target. Hearing the caller does not. Distance was the
   first suspect (from India, RTT is Deepgram 1115 ms, Cartesia 1853 ms, Groq 423 ms,
   NVIDIA 106 ms), but moving the agent to us-east beside the providers made
-  end-of-utterance worse, 634 to 753 ms, while the model got faster, 492 to 312 ms. The
+  end-of-utterance worse, 634 to 772 ms, while the model got faster, 492 to 312 ms. The
   cause of the hearing delay is open. Never present distance as the explanation.
 - Pickup to first spoken word on an outbound call: **1.64 s**, down from 5.2 s.
-- Stack: Deepgram nova-3 streaming STT, Groq `openai/gpt-oss-20b` with NVIDIA Nemotron as
-  fallback, Cartesia Sonic TTS, six MCP tools over SQLite, Twilio SIP both directions.
+- Stack: Deepgram nova-3 streaming STT, Groq `openai/gpt-oss-20b`, the same model through
+  OpenRouter when Groq's free tier runs out, NVIDIA Nemotron last, Cartesia Sonic TTS, six
+  MCP tools over SQLite, Twilio SIP both directions.
 - Nemotron was the intended brain and was demoted on measurement: 597 ms median TTFT
   against a 5203 ms worst case. That decision is a feature of the story, not an apology.
-- 55 tests. CI green.
+- 59 tests. CI green.
 
 ## Constraints
 

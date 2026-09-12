@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # empty for a Groq model that does not accept reasoning_effort.
     groq_reasoning_effort: str = "low"
 
+    # Second in the chain, through OpenRouter. Groq's free tier allows 8,000 tokens a minute,
+    # about three tool turns, and NVIDIA's free endpoint timed out from us-east. Paid per
+    # token. Empty leaves it out of the chain.
+    open_router_api: str = ""
+
     # Empty spawns the tool server over stdio, which is what the deployed image does.
     mcp_server_url: str = ""
     metrics_jsonl: str = "./data/turns.jsonl"
@@ -101,16 +106,41 @@ def _nemotron() -> openai.LLM:
     )
 
 
+def _openrouter() -> openai.LLM:
+    """gpt-oss-20b through OpenRouter, the same model Groq serves in first place.
+
+    Through this plugin, six turns each: gpt-oss-20b called the tool and answered from it
+    6 of 6 times. Nemotron 3.5 Lightning skipped the tool once and twice gave the per-kW
+    range instead of a system's price. OpenRouter serves this from its own Groq account, so
+    our free-tier limit does not apply, and `only` keeps it to hosts that accept tools.
+
+    The cap goes in as `max_tokens`. The plugin's `max_completion_tokens` is a name no
+    OpenRouter host lists, and under `require_parameters` it matched no host at all.
+    """
+    return openai.LLM(
+        model="openai/gpt-oss-20b",
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.open_router_api,
+        temperature=0.3,
+        extra_body={
+            "provider": {"order": ["groq"], "only": ["groq", "coreweave"]},
+            "reasoning": {"effort": "low"},
+            "max_tokens": settings.max_reply_tokens,
+        },
+    )
+
+
 def build_llm() -> _llm.LLM:
-    """Groq first, Nemotron behind it.
+    """Groq first, the same model through OpenRouter second, Nemotron on NVIDIA NIM last.
 
     This ordering is the result of measurement, not preference. Nemotron was the intended
     brain and its tool calling is faultless, but NVIDIA NIM's free tier has a median
     time-to-first-token around 600 ms and a worst case over 5 s, and it timed out
     repeatedly on the follow-up call that carries a tool result back to the model. Groq
     measured 355 ms median, 456 ms worst, with no failures across every test run. On a
-    phone call the tail is what the caller hears, so Groq leads and Nemotron covers Groq's
-    rate limits. See docs/decisions-log.md for the numbers.
+    phone call the tail is what the caller hears, so Groq leads. Its free tier fits about
+    three tool turns a minute, so OpenRouter, paid, takes the overflow, and NVIDIA's free
+    endpoint is the last resort. See docs/decisions-log.md.
     """
     chain = []
     if settings.groq_api_key:
@@ -123,10 +153,14 @@ def build_llm() -> _llm.LLM:
                 reasoning_effort=settings.groq_reasoning_effort or openai.NOT_GIVEN,
             )
         )
+    if settings.open_router_api:
+        chain.append(_openrouter())
     if settings.nvidia_api_key:
         chain.append(_nemotron())
     if not chain:
-        raise RuntimeError("No LLM configured: set GROQ_API_KEY or NVIDIA_API_KEY in .env")
+        raise RuntimeError(
+            "No LLM configured: set GROQ_API_KEY, OPEN_ROUTER_API or NVIDIA_API_KEY in .env"
+        )
     if len(chain) == 1:
         return chain[0]
 

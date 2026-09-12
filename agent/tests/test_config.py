@@ -17,10 +17,20 @@ def settings(monkeypatch):
         "nvidia_api_key": "nv-test",
         "cartesia_api_key": "ct-test",
         "groq_api_key": "",
+        "open_router_api": "",
         "cartesia_voice": "",
     }.items():
         monkeypatch.setattr(cfg.settings, k, v)
     return cfg.settings
+
+
+def test_openrouter_sits_between_groq_and_nvidia(settings, monkeypatch):
+    """Groq's free tier fits about three tool turns a minute and NVIDIA's free endpoint
+    timed out from us-east, so the paid tier goes in the middle."""
+    monkeypatch.setattr(cfg.settings, "groq_api_key", "gq-test")
+    monkeypatch.setattr(cfg.settings, "open_router_api", "or-test")
+    hosts = [m._client.base_url.host for m in cfg.build_llm()._llm_instances]
+    assert hosts == ["api.groq.com", "openrouter.ai", "integrate.api.nvidia.com"]
 
 
 def test_stt_is_deepgram_streaming(settings):

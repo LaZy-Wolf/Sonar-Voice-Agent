@@ -1,14 +1,14 @@
 """End-to-end check: join a room, say something, prove the agent answers.
 
-    python scripts/smoke_call.py ["your question"]
+    python scripts/smoke_call.py ["your question"] [--record turns.jsonl]
 
 Synthesises a question with Cartesia, publishes it into a fresh LiveKit room as if it
-were a caller's microphone, then waits for the agent to speak back. Reports
-time-to-first-audio and the transcript of both sides.
+were a caller's microphone, then waits for the agent to speak back. Reports the agent's
+own time-to-first-audio, read off the metrics topic, and the transcript of both sides.
 
 This is the only test that exercises the whole loop — LiveKit, Deepgram, the LLM,
 the MCP tools and Cartesia — so it is what "the agent works" actually means. It needs
-the MCP server and the worker already running.
+a worker running, local or deployed.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ async def synthesise(text: str) -> bytes:
         return w.readframes(w.getnframes())
 
 
-async def main(question: str) -> int:
+async def main(question: str, record: str | None) -> int:
     room_name = f"sonar-smoke-{int(time.time())}"
     token = (
         api.AccessToken(env("LIVEKIT_API_KEY"), env("LIVEKIT_API_SECRET"))
@@ -78,13 +78,9 @@ async def main(question: str) -> int:
     print(f"synthesised {len(pcm) / 2 / SAMPLE_RATE:.1f}s of audio")
 
     room = rtc.Room()
-    agent_spoke = asyncio.Event()
-    first_audio_at: list[float] = []
     transcript: list[str] = []
     metrics: list[dict] = []
-    # Audio before this instant is the greeting, not an answer to us. Without the gate,
-    # greeting frames get timed against a later question and TTFA comes out negative.
-    gate = [float("inf")]
+    # When the agent last made sustained sound. Used only to wait out the greeting.
     last_loud = [0.0]
 
     @room.on("track_subscribed")
@@ -94,7 +90,7 @@ async def main(question: str) -> int:
 
         async def listen():
             # Require sustained energy, not one loud frame: a single blip of codec noise
-            # was enough to register as "the agent replied" and produce a 1 ms TTFA.
+            # would otherwise count as the agent still talking.
             run = 0
             async for ev in rtc.AudioStream(track):
                 data = ev.frame.data
@@ -103,14 +99,8 @@ async def main(question: str) -> int:
                     for i in range(0, min(len(data), 960), 2)
                 )
                 run = run + 1 if loud else 0
-                if run < SPEECH_FRAMES:
-                    continue
-                now = time.perf_counter()
-                last_loud[0] = now
-                if now > gate[0] and not first_audio_at:
-                    # Credit the start of the run, not the frame that confirmed it.
-                    first_audio_at.append(now - SPEECH_FRAMES * FRAME_MS / 1000)
-                    agent_spoke.set()
+                if run >= SPEECH_FRAMES:
+                    last_loud[0] = time.perf_counter()
 
         asyncio.create_task(listen())
 
@@ -171,8 +161,6 @@ async def main(question: str) -> int:
         drift = started + (n + 1) * FRAME_MS / 1000 - time.perf_counter()
         if drift > 0:
             await asyncio.sleep(drift)
-    spoke_at = time.perf_counter()
-    gate[0] = spoke_at          # only audio after this counts as the reply
 
     # Wait for the answer itself, not a fixed sleep: disconnecting early was cutting the
     # session off mid-reply and making a working agent look broken.
@@ -194,7 +182,6 @@ async def main(question: str) -> int:
         await asyncio.sleep(0.2)
 
     reply = agent_reply()
-    replied_at = time.perf_counter()
     print("\ntranscript:")
     print("\n".join(transcript) if transcript else "  (none captured)")
 
@@ -202,12 +189,6 @@ async def main(question: str) -> int:
         print("\nFAIL: the agent never produced a reply")
         await room.disconnect()
         return 1
-
-    # Approximate only. Authoritative per-stage numbers come from the agent's own
-    # metrics (stage 5); this is an energy heuristic over the received audio.
-    if first_audio_at:
-        print(f"\napprox. time-to-first-audio: {(first_audio_at[0] - spoke_at) * 1000:.0f} ms")
-    print(f"reply complete {replied_at - spoke_at:.1f}s after the question ended")
 
     ok = 0
 
@@ -220,17 +201,22 @@ async def main(question: str) -> int:
 
     m = metrics[-1]
     print(f"\nmetrics over the data channel ({len(metrics)} frame(s)):")
-    print(f"  ttfa {m.get('ttfa_estimate_ms')} ms = eou {m.get('eou_delay_ms')}"
-          f" + llm {m.get('llm_ttft_ms')} + tts {m.get('tts_ttfb_ms')}")
+    print(f"  time to first audio {m.get('ttfa_ms')} ms, timed by LiveKit end to end")
+    print(f"  stages: eou {m.get('eou_delay_ms')}, llm first token {m.get('llm_ttft_ms')}"
+          f" on call {m.get('llm_calls')}, tts {m.get('tts_ttfb_ms')}")
     print(f"  served by {m.get('stt_provider')} / {m.get('llm_provider')}"
           f" / {m.get('tts_provider')}")
     missing = [
-        k for k in ("ttfa_estimate_ms", "eou_delay_ms", "llm_ttft_ms", "tts_ttfb_ms",
-                    "speech_id") if k not in m
+        k for k in ("ttfa_ms", "eou_delay_ms", "llm_ttft_ms", "tts_ttfb_ms", "speech_id")
+        if k not in m
     ]
     if missing:
         print(f"  FAIL: the HUD expects these fields and they are absent: {missing}")
         ok = 1
+    elif record:
+        with open(record, "a", encoding="utf-8") as f:
+            f.writelines(json.dumps(frame) + "\n" for frame in metrics)
+        print(f"  appended to {record}")
 
     # Audio arriving is not the same as the right answer arriving. For the default
     # question the knowledge base says 25 years, so the reply has to contain it.
@@ -248,4 +234,7 @@ async def main(question: str) -> int:
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("question", nargs="?", default=DEFAULT_QUESTION)
-    sys.exit(asyncio.run(main(p.parse_args().question)))
+    p.add_argument("--record", metavar="JSONL",
+                   help="append the turn's metrics to this file, for scripts/latency_report.py")
+    args = p.parse_args()
+    sys.exit(asyncio.run(main(args.question, args.record)))

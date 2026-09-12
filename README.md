@@ -20,7 +20,7 @@ Browser (Next.js) ──WebRTC──┐
                              ├─► LiveKit room ◄──► agent worker
 PSTN ──► Twilio SIP trunk ───┘                      │
                                                     ├─► Deepgram nova-3   (speech to text, streaming)
-                                                    ├─► Groq gpt-oss-20b   (with NVIDIA Nemotron behind it)
+                                                    ├─► Groq gpt-oss-20b   (then OpenRouter, then NVIDIA Nemotron)
                                                     ├─► Cartesia Sonic    (text to speech)
                                                     └─► MCP server ──► SQLite
 ```
@@ -31,47 +31,44 @@ without knowing the difference. The only thing that changes is the opening line.
 
 ## Measured latency
 
-Six turns, browser path, agent running in India against US-hosted providers.
-Regenerate with `make report-md`; the full table is in
-[`docs/latency-budget.md`](docs/latency-budget.md).
+Five turns against the deployed agent in `us-east`, three of them answered through a tool
+call. Time to first audio is LiveKit's own end-to-end figure: from the caller going quiet to
+the agent's first audio frame, the tool round included. The frames are in
+[`docs/measurements/us-east-2026-09-11.jsonl`](docs/measurements/us-east-2026-09-11.jsonl),
+and `make report-md` regenerates
+[`docs/latency-budget.md`](docs/latency-budget.md) from them.
 
 | Stage | p50 | p95 | target | met |
 |---|---:|---:|---:|:--:|
-| End-of-utterance detection | 634 ms | 646 ms | 350 ms | no |
-| Transcription | 508 ms | 537 ms | 150 ms | no |
-| LLM first token | 492 ms | 721 ms | 500 ms | yes |
-| TTS first byte | 129 ms | 195 ms | 150 ms | yes |
-| **Time to first audio** | **1299 ms** | **1473 ms** | 900 ms | no |
+| End-of-utterance detection | 772 ms | 800 ms | 350 ms | no |
+| Transcription | 165 ms | 204 ms | 150 ms | no |
+| LLM first token | 312 ms | 366 ms | 500 ms | yes |
+| TTS first byte | 163 ms | 194 ms | 150 ms | no |
+| **Time to first audio** | **1412 ms** | **1487 ms** | 900 ms | no |
 
-The model stages hit their targets. Hearing the caller does not. Round-trip from the machine
-running the agent:
+A turn that has to look something up takes 1475 ms at p50; one the model answers directly
+takes 920 ms. Hearing the caller is the stage that misses, by a distance.
 
-| Provider | median RTT |
-|---|---:|
-| NVIDIA NIM | 106 ms |
-| Groq | 423 ms |
-| Deepgram | 1115 ms |
-| Cartesia | 1853 ms |
+**The stages do not add up to the total, in either direction.** livekit-agents starts the
+model on the transcript while the turn detector is still deciding, so thinking overlaps
+hearing. Adding the stages up overstated a direct turn by 220 to 360 ms, and understated a
+tool turn by 170 to 210 ms, because a tool call's own round trip belongs to no stage at all.
+Earlier versions of this table did exactly that.
 
-Deepgram and Cartesia have no region near India, and halving `min_endpointing_delay` from
-400 ms to 200 ms moved end-of-utterance by only 10 ms. That made distance the obvious
-suspect, so the agent was deployed to `us-east`, beside the providers. Five turns there:
+**Distance was the first suspect, and it was wrong.** With the agent on a laptop in India
+and every provider in the United States, round trips measured Deepgram 1115 ms, Cartesia
+1853 ms, Groq 423 ms, NVIDIA 106 ms, and halving `min_endpointing_delay` moved
+end-of-utterance by only 10 ms. Moving the agent to `us-east`, beside the providers, made
+transcription far faster (508 to 165 ms) and the model faster (492 to 312 ms), but
+end-of-utterance rose, 634 to 772 ms. The cause is still open. The two candidates are
+turn-detector inference on the cloud's 2 vCPU against the laptop's 8 cores, and endpointing
+behaviour in livekit-agents 1.8.1. A prediction of about 730 ms was wrong.
 
-| Stage | India (laptop) | us-east (LiveKit Cloud) |
-|---|---:|---:|
-| End-of-utterance | 634 ms | 753 ms |
-| LLM first token | 492 ms | 312 ms |
-| TTS first byte | 129 ms | 167 ms |
-| **Time to first audio** | **1299 ms** | **1225 ms** |
+The worker logs "at full capacity" at a load of 0.82 to 0.85, against its 0.7 threshold,
+while serving a single call: one conversation uses most of those two vCPUs.
 
-The model got faster, as predicted. Hearing did not, which falsifies the diagnosis: with the
-agent next to Deepgram, end-of-utterance rose. The cause is still open. The two candidates
-are turn-detector inference on the cloud's 2 vCPU against the laptop's 8 cores, and
-endpointing changes in livekit-agents 1.8.1, which the cloud build resolved. The earlier
-prediction of about 730 ms was wrong.
-
-These are agent-side numbers. A caller in India now also sends their audio across an ocean
-and back, which no stage metric counts.
+These are agent-side numbers. They stop at the agent's first audio frame and do not count
+the trip out to the caller.
 
 ## Design decisions
 
@@ -89,6 +86,15 @@ ever calling a tool, so the caller heard a promise and then silence. At its defa
 temperature it did call tools, but spoke a preamble first. `gpt-oss-20b` searched the
 knowledge base silently and answered from it in six of six full turns, with
 `reasoning_effort` set low to keep its hidden reasoning to 7 to 19 tokens.
+
+**A second tier covers Groq's free limits.** Groq's free tier allows 8,000 tokens a
+minute and 1,000 requests a day, which is about three tool turns a minute. When it runs out
+the chain goes to the same `gpt-oss-20b` through OpenRouter, paid and served from
+OpenRouter's own Groq capacity, with NVIDIA's free endpoint last. Two other models were
+tried in that slot and dropped for answering from memory; the numbers are in the decisions
+log. Proven in production by holding the Groq budget at zero from a laptop: the deployed
+agent was refused with 429, switched, and still answered from the knowledge base, 200 ms
+later than usual.
 
 **The fallback chain is load-bearing, not decorative.** It has fired during real calls
 and rescued turns. `attempt_timeout` is 2.5 s rather than the 5 s default, because five
@@ -115,7 +121,7 @@ callers into the same conversation.
   reply is grounded in the knowledge base. It fails on a wrong answer, not merely on a
   dead process. It also subscribes to the metrics topic and checks every field the
   browser latency panel reads.
-- 55 unit tests over the tools, the settings, the metrics aggregation and the outbound
+- 59 unit tests over the tools, the settings, the metrics aggregation and the outbound
   answer gate.
 
 ```bash

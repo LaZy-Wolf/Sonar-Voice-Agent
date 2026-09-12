@@ -23,6 +23,7 @@ from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentSession,
+    ConversationItemAddedEvent,
     JobContext,
     JobProcess,
     MetricsCollectedEvent,
@@ -190,6 +191,12 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_metrics(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
         sink.ingest(ev.metrics)
+
+    # The spoken reply carries LiveKit's own end-to-end timing, tool round included,
+    # which is what a turn record reports as time to first audio.
+    @session.on("conversation_item_added")
+    def _on_item(ev: ConversationItemAddedEvent) -> None:
+        sink.ingest_reply(ev.item)
 
     # Tell the agent why it rang, without spending a turn saying it out loud. This goes
     # into instructions rather than chat_ctx: an Agent's chat context is read-only, and

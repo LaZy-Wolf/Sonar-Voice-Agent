@@ -5,6 +5,8 @@ export type TurnMetrics = {
   eou_delay_ms: number;
   transcription_delay_ms?: number;
   llm_ttft_ms: number;
+  /** Model calls in the turn. Two means it called a tool before answering. */
+  llm_calls?: number;
   llm_provider?: string;
   llm_completion_tokens?: number;
   llm_tokens_per_s?: number;
@@ -12,7 +14,8 @@ export type TurnMetrics = {
   tts_provider?: string;
   tts_audio_duration_ms?: number;
   stt_provider?: string;
-  ttfa_estimate_ms: number;
+  /** Caller going quiet to the agent's first audio, timed by LiveKit, tool round included. */
+  ttfa_ms: number;
 };
 
 /**
@@ -30,10 +33,11 @@ export const STAGES = [
 export const TTFA_TARGET = 900;
 export const TTFA_FULL = 3000;
 
-/** Measured, not claimed. Every figure here comes from agent/data/turns.jsonl. */
+/** Measured, not claimed. Every figure comes from docs/measurements/ or the decisions log. */
 export const MEASURED = {
-  browser: { p50: 1299, p95: 1473, turns: 6 },
-  phone: { p50: 1666, p95: 1809 },
+  browser: { p50: 1412, p95: 1487, turns: 5 },
+  withTool: { p50: 1475, turns: 3 },
+  direct: { p50: 920, turns: 2 },
   pickupToSpeech: { before: 5200, after: 1640 },
   rtt: [
     { provider: "NVIDIA NIM", ms: 106 },

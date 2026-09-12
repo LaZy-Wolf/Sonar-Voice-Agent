@@ -26,7 +26,7 @@ STAGES = [
     ("transcription_delay_ms", "Transcription", 150),
     ("llm_ttft_ms", "LLM first token", 500),
     ("tts_ttfb_ms", "TTS first byte", 150),
-    ("ttfa_estimate_ms", "Time-to-first-audio", 900),
+    ("ttfa_ms", "Time-to-first-audio", 900),
 ]
 
 
@@ -104,10 +104,12 @@ def main() -> int:
 
     if args.markdown:
         doc = ROOT / "docs" / "latency-budget.md"
+        full = path.resolve()
+        source = full.relative_to(ROOT).as_posix() if full.is_relative_to(ROOT) else full.name
         body = [
             "# Latency budget",
             "",
-            f"Measured over {len(turns)} turns. Regenerate with `make report-md`.",
+            f"Measured over {len(turns)} turns from `{source}`. Regenerate with `make report-md`.",
             "",
             render(summarise(turns), markdown=True),
             "",

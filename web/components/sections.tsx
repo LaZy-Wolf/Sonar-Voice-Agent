@@ -213,7 +213,7 @@ export function RoomTone() {
           Thinking and speaking meet their budgets. Hearing does not. With the agent on a
           laptop in India and every provider in the United States, distance looked like the
           cause, so the agent was moved to us-east, beside them. The model&apos;s first token
-          fell from 492 to 312 milliseconds. End-of-utterance rose, from 634 to 753.
+          fell from 492 to 312 milliseconds. End-of-utterance rose, from 634 to 772.
           Distance was not what held hearing back, and the real cause is still being
           isolated. Round trips measured from the laptop, for the record:
         </p>
@@ -238,8 +238,9 @@ export function RoomTone() {
         </ul>
 
         <p className="mt-8 max-w-[64ch] text-sm leading-relaxed text-legend-dim">
-          Time to first audio in us-east: 1225 ms at p50 over five turns, against 1299 ms
-          from India. The earlier prediction was about 730 ms, and it was wrong.
+          Time to first audio in us-east, timed end to end rather than added up: 1412 ms at
+          p50 over five turns, and 1475 ms when the answer needed a tool. The earlier
+          prediction was about 730 ms, and it was wrong.
         </p>
       </div>
     </section>
@@ -251,7 +252,7 @@ export function RoomTone() {
 const STACK = [
   ["Transport", "LiveKit · WebRTC and SIP"],
   ["Speech to text", "Deepgram nova-3, streaming"],
-  ["Model", "Groq gpt-oss-20b, NVIDIA Nemotron behind it"],
+  ["Model", "Groq gpt-oss-20b, then OpenRouter, then Nemotron"],
   ["Text to speech", "Cartesia Sonic"],
   ["Tools", "MCP over SQLite"],
   ["Telephony", "Twilio SIP trunk, both directions"],
@@ -282,7 +283,7 @@ export function Colophon() {
           >
             Source on GitHub
           </a>
-          <span className="figure text-[11px] text-legend-dim">55 tests · CI green</span>
+          <span className="figure text-[11px] text-legend-dim">59 tests · CI green</span>
           <span className="text-[11px] text-legend-dim">
             Helios Solar is fiction. The measurements are not.
           </span>

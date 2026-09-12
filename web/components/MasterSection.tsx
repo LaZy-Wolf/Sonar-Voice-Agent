@@ -113,7 +113,7 @@ export function MasterSection({
         </div>
 
         {/* Not a hero statistic: the headline number is engraved on the desk as a plate,
-            with the target beside it and the honest phone figure underneath. */}
+            with the tool-call figure and the missed target underneath. */}
         <dl className="raised w-full max-w-xs shrink-0 rounded-[3px] p-5">
           <dt className="legend text-[10px] text-legend-dim">Time to first audio</dt>
           <dd className="mt-2 flex items-baseline gap-2">
@@ -127,8 +127,8 @@ export function MasterSection({
             <span>{MEASURED.browser.p95} ms</span>
           </dd>
           <dd className="figure mt-1.5 flex justify-between text-[11px] text-legend-dim">
-            <span>over a phone</span>
-            <span>{MEASURED.phone.p50} ms</span>
+            <span>with a tool call</span>
+            <span>{MEASURED.withTool.p50} ms</span>
           </dd>
           <dd className="figure mt-1.5 flex justify-between text-[11px]">
             <span className="text-legend-dim">target</span>

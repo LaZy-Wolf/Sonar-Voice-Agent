@@ -29,7 +29,7 @@ export function ChannelStrips() {
   useDataChannel("sonar.metrics", onFrame);
 
   const shown = selected ? turns.find((t) => t.speech_id === selected) : turns.at(-1);
-  const p50 = median(turns.map((t) => t.ttfa_estimate_ms));
+  const p50 = median(turns.map((t) => t.ttfa_ms));
 
   return (
     <section ref={ref} className="reveal scored" aria-labelledby="strips-heading">
@@ -42,7 +42,8 @@ export function ChannelStrips() {
         </h2>
         <p className="mt-4 max-w-[62ch] text-sm leading-relaxed text-legend">
           A needle past the red mark is a stage over its target. These move while you talk;
-          before that they rest at zero.
+          before that they rest at zero. The model starts before the turn detector has
+          decided, so the stages overlap: they do not add up to the total below.
         </p>
 
         <div className="mt-10 grid grid-cols-2 gap-6 lg:grid-cols-4 lg:gap-8">
@@ -67,19 +68,22 @@ export function ChannelStrips() {
               {selected ? "Selected turn" : "Latest turn"}
             </span>
             <p className="figure mt-1.5 text-2xl text-face">
-              {shown ? `${Math.round(shown.ttfa_estimate_ms)} ms` : "—"}
+              {shown ? `${Math.round(shown.ttfa_ms)} ms` : "—"}
               {shown && (
                 <span
                   className="ml-2 text-[11px]"
                   style={{
                     color:
-                      shown.ttfa_estimate_ms <= TTFA_TARGET
+                      shown.ttfa_ms <= TTFA_TARGET
                         ? "var(--color-legend-dim)"
                         : "var(--color-over)",
                   }}
                 >
-                  {shown.ttfa_estimate_ms <= TTFA_TARGET ? "within budget" : "over budget"}
+                  {shown.ttfa_ms <= TTFA_TARGET ? "within budget" : "over budget"}
                 </span>
+              )}
+              {shown && (shown.llm_calls ?? 1) > 1 && (
+                <span className="ml-2 text-[11px] text-legend-dim">· includes a tool call</span>
               )}
             </p>
           </div>
@@ -115,23 +119,23 @@ export function ChannelStrips() {
             <ol className="mt-3 flex h-16 items-end gap-1.5">
               {turns.map((t) => {
                 const isSel = selected === t.speech_id;
-                const over = t.ttfa_estimate_ms > TTFA_TARGET;
+                const over = t.ttfa_ms > TTFA_TARGET;
                 return (
                   <li key={t.speech_id} className="flex h-full flex-1 items-end">
                     <button
                       type="button"
                       onClick={() => setSelected(isSel ? null : t.speech_id)}
                       aria-pressed={isSel}
-                      title={`${Math.round(t.ttfa_estimate_ms)} ms`}
+                      title={`${Math.round(t.ttfa_ms)} ms`}
                       className="w-full rounded-[1px] transition-[opacity,height] duration-300 ease-[var(--ease-settle)]"
                       style={{
-                        height: `${Math.max(6, Math.min(100, (t.ttfa_estimate_ms / 2400) * 100))}%`,
+                        height: `${Math.max(6, Math.min(100, (t.ttfa_ms / 2400) * 100))}%`,
                         background: over ? "var(--color-over)" : "var(--color-signal-dim)",
                         opacity: selected && !isSel ? 0.22 : 1,
                       }}
                     >
                       <span className="sr-only">
-                        Turn at {Math.round(t.ttfa_estimate_ms)} milliseconds
+                        Turn at {Math.round(t.ttfa_ms)} milliseconds
                       </span>
                     </button>
                   </li>

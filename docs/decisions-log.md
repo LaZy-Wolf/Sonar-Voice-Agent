@@ -1,6 +1,6 @@
 # Decisions log
 
-Adaptations made during the build, and why. Newest first.
+Adaptations made during the build, and why, in the order they were made.
 
 ## Stage 1 — repo skeleton
 
@@ -326,8 +326,9 @@ two model calls under one `speech_id`, and the metrics sink keeps only the last 
 which belongs to the second call, the answer. The first call, which decides to use the tool,
 and the tool itself both finish before any audio, and neither is counted. The tool-call
 column above is a lower bound on the missing time, since it is first token rather than
-completion. Every published time to first audio for a tool turn is low by at least that
-much. This joins the failover blind spot above. The smoke test's own audio-based estimate
+completion. Every published time to first audio for a tool turn is low, though that bound
+is wrong: measured afterwards the gap is 170 to 210 ms, for the reason in the next section.
+This joins the failover blind spot above. The smoke test's own audio-based estimate
 printed 28, −33 and −35 ms for these turns, which is impossible, so it is no cross-check
 until it is fixed either.
 
@@ -337,3 +338,84 @@ against a threshold of 0.7, falling back to 0.31 to 0.46 afterwards. One convers
 most of the two vCPUs. A worker marked unavailable is not offered new jobs; whether the free
 plan's single replica then scales out is untested. The same reading is evidence, not proof,
 for the turn-detector explanation of end-of-utterance, which measured 794 to 818 ms here.
+
+## Time to first audio, measured instead of added up
+
+**The sink now records LiveKit's own end-to-end timing.** livekit-agents stamps each spoken
+reply with `e2e_latency`, from the moment the caller stopped speaking to the agent's first
+audio frame. On a tool turn the answering step inherits the caller's metrics, because they
+are cleared only once audio has played, so the figure spans end-of-utterance, the tool-call
+round, the tool, the answer's first token and TTS. The sink stores it as `ttfa_ms` and
+completes a turn only when it arrives. The stage fields stay as a breakdown, and
+`llm_calls` counts the model calls so tool turns are visible. The HUD reads the new field
+and marks a turn that included a tool call.
+
+**The smoke test's caller-side estimate is gone.** It printed values between −35 and 28 ms,
+and an impossible number is worse than none. The smoke test now prints the agent's measured
+figure and can append each frame to a file for `scripts/latency_report.py`.
+
+**In production the sum was wrong in both directions.** Five turns against the deployed
+agent in us-east, three of them answered through a tool call:
+
+| Turn | Model calls | Stages added up | Measured | Difference |
+|---|---:|---:|---:|---:|
+| Panel warranty | 2 | 1238 ms | 1412 ms | +174 ms |
+| 5 kW price | 2 | 1282 ms | 1475 ms | +193 ms |
+| Financing | 2 | 1281 ms | 1487 ms | +206 ms |
+| "Who am I speaking with?" | 1 | 1154 ms | 934 ms | -221 ms |
+| "Thanks, that is all I needed." | 1 | 1266 ms | 907 ms | -359 ms |
+
+Adding the stages overstated every direct turn by 220 to 360 ms and understated every tool
+turn by 170 to 210 ms. livekit-agents 1.8.1 enables preemptive generation by default, so the
+model starts on the transcript while the turn detector is still deciding: thinking overlaps
+hearing instead of following it. The earlier claim that a tool turn was low by at least the
+tool call's first token was therefore wrong.
+
+Stage medians over those five turns: end-of-utterance 772 ms, transcription 165 ms, model
+first token 312 ms, TTS first byte 163 ms. Time to first audio is 1412 ms at p50 and 1487 ms
+at p95 — 1475 ms for the three tool turns, 920 ms for the two direct ones. The frames are in
+`docs/measurements/us-east-2026-09-11.jsonl`.
+
+## A second model tier, through OpenRouter
+
+**Why a tier is needed.** Groq's response headers give the free-tier limits for
+`gpt-oss-20b`: 8,000 tokens a minute and 1,000 requests a day. A tool turn is two requests
+of about 1,100 and 1,450 prompt tokens, so roughly three tool turns fit in a minute, fewer
+than one person asking questions at a natural pace. The only fallback was NVIDIA's free
+endpoint, which answered from us-east with "Service temporarily overloaded" and timeouts.
+
+**The first attempt could not route at all.** A forced failover, with Groq given a bad key,
+showed OpenRouter refusing every request with 404, "No endpoints found that can handle the
+requested parameters", and NVIDIA serving the turn instead. The plugin sends the reply cap
+as `max_completion_tokens`. Every OpenRouter host lists only `max_tokens`, so
+`require_parameters` matched none of them. A raw benchmark that sent `max_tokens` had hidden
+this. The cap now goes in as `max_tokens`, and an explicit list of tool-capable hosts
+replaces `require_parameters`.
+
+**Why this model.** Candidates ran through the livekit openai plugin itself, with the real
+system prompt, tool schema and knowledge base, six turns each, measured from India:
+
+| Model via OpenRouter | Called the tool | Answered from it | Tool call p50 / max | Answer first token p50 / max |
+|---|---:|---:|---:|---:|
+| `nvidia/nemotron-3.5-lightning` | 5 of 6 | 3 of 6 | 954 / 1831 ms | 600 / 954 ms |
+| `openai/gpt-oss-20b` | 6 of 6 | 6 of 6 | 584 / 1200 ms | 625 / 900 ms |
+| `openai/gpt-oss-120b` | 6 of 6 | 4 of 6 | 318 / 853 ms | 533 / 862 ms |
+
+Nemotron Lightning skipped the tool once, and in an earlier three-turn check it skipped it
+and gave a ten-year product warranty where the knowledge base says twelve. Twice it answered
+the five-kilowatt question with the per-kilowatt range and never the system price.
+gpt-oss-120b twice answered the financing question without the rate it had just been given;
+two of its warranty answers were scored by hand, because the script's check missed a
+non-breaking hyphen. The second tier is therefore the same `gpt-oss-20b` the first tier
+serves, so a failover does not change how the agent behaves. OpenRouter serves it from its
+own Groq capacity, which our free-tier limit does not touch, with CoreWeave behind it.
+
+With the fix, the same forced failover served both steps of the turn from OpenRouter: the
+tool call with nothing spoken first, then an answer from the knowledge base.
+
+**In production.** With the organisation's Groq token budget held near zero from a laptop,
+the deployed agent's Groq call was refused with 429, the chain switched, and OpenRouter
+answered the financing question from the knowledge base: 1691 ms to first audio against
+1487 ms for the same question on Groq, so the overflow costs about 200 ms. The container
+logged the switch and never `all LLMs failed`. Holding the budget down cost 22 of the 1,000
+Groq requests the free tier allows in a day.

@@ -3,6 +3,9 @@
 VENV := .venv
 PY   := $(VENV)/Scripts/python.exe
 
+# The published budget comes from the deployed agent, not from whatever is in agent/data.
+MEASUREMENT := docs/measurements/us-east-2026-09-11.jsonl
+
 setup:
 	uv venv --python 3.12 $(VENV)
 	uv pip install --python $(PY) -e "./mcp-server[dev]" -e "./agent[dev]"
@@ -33,7 +36,7 @@ lint:
 	$(PY) -m ruff check .
 
 report-md:
-	$(PY) scripts/latency_report.py --markdown
+	$(PY) scripts/latency_report.py --jsonl $(MEASUREMENT) --markdown
 
 report:
 	$(PY) scripts/latency_report.py --jsonl agent/data/turns.jsonl
