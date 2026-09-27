@@ -18,10 +18,28 @@ const jetbrains = JetBrains_Mono({
   weight: ["400", "500", "700"],
 });
 
+const description =
+  "A real-time voice agent you can talk to or phone, with every stage of every turn measured.";
+
 export const metadata: Metadata = {
+  // Absolute URLs for the preview image, so LinkedIn and other link unfurlers can fetch it.
+  metadataBase: new URL("https://sonar-voice-agent.vercel.app"),
   title: "Sonar",
-  description:
-    "A real-time voice agent you can talk to or phone, with every stage of every turn measured.",
+  description,
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: "Sonar",
+    title: "Sonar: it picks up the phone",
+    description,
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Sonar's live call page with its latency panel" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Sonar: it picks up the phone",
+    description,
+    images: ["/og.png"],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
