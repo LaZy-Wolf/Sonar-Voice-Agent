@@ -39,22 +39,56 @@ export const MEASURED = {
   withTool: { p50: 1475, turns: 3 },
   direct: { p50: 920, turns: 2 },
   pickupToSpeech: { before: 5200, after: 1640 },
-  rtt: [
-    { provider: "NVIDIA NIM", ms: 106 },
-    { provider: "Groq", ms: 423 },
-    { provider: "Deepgram", ms: 1115 },
-    { provider: "Cartesia", ms: 1853 },
+  /** Stage p50s and p95s from the deployed agent in us-east. */
+  stages: [
+    { label: "Hearing", note: "end of utterance", p50: 772, p95: 800, target: 350 },
+    { label: "Transcribing", note: "Deepgram nova-3", p50: 165, p95: 204, target: 150 },
+    { label: "Thinking", note: "first model token", p50: 312, p95: 366, target: 500 },
+    { label: "Speaking", note: "first TTS byte", p50: 163, p95: 194, target: 150 },
+  ],
+  /** The same stages before and after moving the agent beside the providers. */
+  moved: [
+    { label: "Hearing", india: 634, usEast: 772 },
+    { label: "Transcribing", india: 508, usEast: 165 },
+    { label: "Thinking", india: 492, usEast: 312 },
   ],
 } as const;
 
 export const TOOLS = [
-  { name: "get_current_datetime", does: "Resolves today and tomorrow in IST before any date is interpreted." },
-  { name: "lookup_customer", does: "Finds a customer by email, phone, or part of a name." },
-  { name: "create_lead", does: "Records someone who is not a customer yet." },
-  { name: "check_availability", does: "Free site-visit slots on a date, excluding what is booked." },
-  { name: "book_site_visit", does: "Books a slot, refusing one that clashes." },
-  { name: "search_knowledge_base", does: "Searches the FAQ. Every price and warranty comes from here." },
+  {
+    name: "search_knowledge_base",
+    does: "Searches the FAQ. Every price, subsidy and warranty it speaks comes from here.",
+    try: "How long is the warranty on the panels?",
+  },
+  {
+    name: "check_availability",
+    does: "Free site-visit slots on a date, excluding what is already booked.",
+    try: "What slots do you have on Friday?",
+  },
+  {
+    name: "book_site_visit",
+    does: "Books a slot, and refuses one that clashes.",
+    try: "Book me the eleven o'clock.",
+  },
+  {
+    name: "lookup_customer",
+    does: "Finds a customer by email, phone number, or part of a name.",
+    try: "I'm already a customer, can you find my account?",
+  },
+  {
+    name: "create_lead",
+    does: "Records someone who is not a customer yet.",
+    try: "I'd like a quote for my house in Warangal.",
+  },
+  {
+    name: "get_current_datetime",
+    does: "Resolves today and tomorrow in IST before any date is interpreted.",
+    try: "Can someone come out tomorrow?",
+  },
 ] as const;
+
+export const REPO = "https://github.com/LaZy-Wolf/Sonar-Voice-Agent";
+export const DECISIONS = `${REPO}/blob/main/docs/decisions-log.md`;
 
 export function median(values: number[]): number {
   if (values.length === 0) return 0;
