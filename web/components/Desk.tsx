@@ -1,91 +1,51 @@
 "use client";
 
-import { RoomAudioRenderer, RoomContext, StartAudio } from "@livekit/components-react";
-import { ConnectionState, Room, RoomEvent } from "livekit-client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useState } from "react";
 import { MasterSection } from "@/components/MasterSection";
 import { Decisions, Footer, Latency, Phone, Tools } from "@/components/sections";
 import { SignalPath } from "@/components/SignalFlow";
 import { TopBar } from "@/components/TopBar";
-import { useTurns } from "@/lib/useTurns";
+import type { Line, Session, TurnMetrics } from "@/lib/types";
+
+// The LiveKit client is most of the page's JavaScript and nothing needs it until a call
+// starts, so it is fetched on intent (hover or focus on Start talking) or on the click.
+const loadLive = () => import("@/components/LiveLayer");
+const LiveLayer = dynamic(loadLive, { ssr: false });
 
 export function Desk({ dialOut }: { dialOut: boolean }) {
-  const room = useMemo(() => new Room({ adaptiveStream: true, dynacast: true }), []);
-  const [connection, setConnection] = useState<ConnectionState | "connecting">(
-    ConnectionState.Disconnected,
-  );
+  const [session, setSession] = useState<Session>("idle");
+  const [agentState, setAgentState] = useState("disconnected");
+  const [lines, setLines] = useState<Line[]>([]);
+  const [turns, setTurns] = useState<TurnMetrics[]>([]);
   const [micMuted, setMicMuted] = useState(false);
   const [error, setError] = useState<string>();
+  const [vizTarget, setVizTarget] = useState<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const onState = (s: ConnectionState) => setConnection(s);
-    room.on(RoomEvent.ConnectionStateChanged, onState);
-    return () => {
-      room.off(RoomEvent.ConnectionStateChanged, onState);
-      room.disconnect();
-    };
-  }, [room]);
-
-  const start = useCallback(async () => {
+  const start = useCallback(() => {
     setError(undefined);
-    setConnection("connecting");
-    try {
-      const res = await fetch("/api/token");
-      if (!res.ok) throw new Error("Could not get a token from the server.");
-      const { token, url } = (await res.json()) as { token: string; url: string };
-      await room.connect(url, token);
-      // Publishing the mic is what triggers the permission prompt, so it has to happen
-      // inside the click handler to count as a user gesture.
-      await room.localParticipant.setMicrophoneEnabled(true);
-      setMicMuted(false);
-    } catch (e) {
-      room.disconnect();
-      setConnection(ConnectionState.Disconnected);
-      setError(
-        e instanceof Error && e.name === "NotAllowedError"
-          ? "Microphone access was blocked. Allow it in your browser and try again."
-          : "Could not start the call. Check your connection and try again.",
-      );
-    }
-  }, [room]);
+    setMicMuted(false);
+    setSession("connecting");
+  }, []);
 
-  const end = useCallback(() => room.disconnect(), [room]);
+  const end = useCallback(() => {
+    setSession("idle");
+    setAgentState("disconnected");
+  }, []);
 
-  const toggleMic = useCallback(async () => {
-    const next = !micMuted;
-    await room.localParticipant.setMicrophoneEnabled(!next);
-    setMicMuted(next);
-  }, [room, micMuted]);
+  const fail = useCallback((message: string) => {
+    setError(message);
+    setSession("idle");
+    setAgentState("disconnected");
+  }, []);
 
-  return (
-    <RoomContext.Provider value={room}>
-      {/* Without this the agent is connected but inaudible. */}
-      <RoomAudioRenderer />
-      <StartAudio label="Tap to enable audio" className="sr-only" />
-      <Body
-        live={connection === ConnectionState.Connected}
-        connection={connection}
-        micMuted={micMuted}
-        onStart={start}
-        onEnd={end}
-        onToggleMic={toggleMic}
-        error={error}
-        dialOut={dialOut}
-      />
-    </RoomContext.Provider>
+  const addTurn = useCallback(
+    (turn: TurnMetrics) => setTurns((prev) => [...prev, turn].slice(-40)),
+    [],
   );
-}
 
-/** Everything that reads room data, so it sits inside the RoomContext provider. */
-function Body({
-  live,
-  dialOut,
-  ...console
-}: Omit<React.ComponentProps<typeof MasterSection>, "turns"> & {
-  live: boolean;
-  dialOut: boolean;
-}) {
-  const turns = useTurns();
+  const live = session === "live";
+
   return (
     <>
       <a
@@ -96,14 +56,39 @@ function Body({
       </a>
       <TopBar live={live} />
       <main id="main">
-        <MasterSection {...console} turns={turns} />
-        <SignalPath live={live} turns={turns} />
+        <MasterSection
+          session={session}
+          agentState={agentState}
+          lines={lines}
+          turns={turns}
+          micMuted={micMuted}
+          error={error}
+          onStart={start}
+          onEnd={end}
+          onToggleMic={() => setMicMuted((m) => !m)}
+          onIntent={loadLive}
+          vizRef={setVizTarget}
+        />
+        <SignalPath live={live} agentState={agentState} turns={turns} />
         <Tools />
         <Phone dialOut={dialOut} />
         <Latency />
         <Decisions />
       </main>
       <Footer />
+
+      {session !== "idle" && (
+        <LiveLayer
+          micMuted={micMuted}
+          vizTarget={vizTarget}
+          onConnected={() => setSession("live")}
+          onEnded={end}
+          onError={fail}
+          onAgentState={setAgentState}
+          onLines={setLines}
+          onTurn={addTurn}
+        />
+      )}
     </>
   );
 }

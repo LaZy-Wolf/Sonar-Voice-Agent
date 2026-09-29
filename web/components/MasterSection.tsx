@@ -1,39 +1,41 @@
 "use client";
 
-import {
-  BarVisualizer,
-  useRoomContext,
-  useTranscriptions,
-  useVoiceAssistant,
-} from "@livekit/components-react";
-import type { ConnectionState } from "livekit-client";
 import type { CSSProperties } from "react";
-import { MEASURED, REPO, type TurnMetrics } from "@/lib/types";
+import { type Line, MEASURED, REPO, type Session, type TurnMetrics } from "@/lib/types";
 
 type Props = {
-  connection: ConnectionState | "connecting";
+  session: Session;
+  agentState: string;
+  lines: Line[];
+  turns: TurnMetrics[];
   micMuted: boolean;
+  error?: string;
   onStart: () => void;
   onEnd: () => void;
   onToggleMic: () => void;
-  error?: string;
-  turns: TurnMetrics[];
+  /** Start fetching the call code as soon as someone looks like they will press Start. */
+  onIntent: () => void;
+  vizRef: (el: HTMLDivElement | null) => void;
 };
 
 const d = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 
 /** The first screen: what it is, the one control, and the console it talks through. */
 export function MasterSection({
-  connection,
+  session,
+  agentState,
+  lines,
+  turns,
   micMuted,
+  error,
   onStart,
   onEnd,
   onToggleMic,
-  error,
-  turns,
+  onIntent,
+  vizRef,
 }: Props) {
-  const live = connection === "connected";
-  const busy = connection === "connecting";
+  const live = session === "live";
+  const busy = session === "connecting";
 
   return (
     <section id="console" className="relative overflow-hidden">
@@ -46,23 +48,24 @@ export function MasterSection({
 
       <div className="relative mx-auto grid w-full max-w-6xl gap-14 px-6 pb-20 pt-14 sm:px-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,29rem)] lg:items-center lg:pb-28 lg:pt-20">
         <div>
-          <h1
-            className="rise max-w-[12ch] text-[clamp(3rem,7.2vw,5.5rem)] font-semibold leading-[0.95] tracking-[-0.04em] text-face"
-            style={d(0)}
-          >
+          {/* The headline and lede paint on first frame: they are the largest content, and
+              fading them in would hold back the page's first meaningful paint. */}
+          <h1 className="max-w-[12ch] text-[clamp(3rem,7.2vw,5.5rem)] font-semibold leading-[0.95] tracking-[-0.04em] text-face">
             It picks up the phone.
           </h1>
 
-          <p className="rise mt-7 max-w-[46ch] text-[17px] leading-[1.6] text-legend" style={d(80)}>
+          <p className="mt-7 max-w-[46ch] text-[17px] leading-[1.6] text-legend">
             A voice agent that answers questions, looks customers up and books site visits,
             in the browser or on an ordinary phone line. Every stage of every turn is timed
             while you speak, including the stages that miss.
           </p>
 
-          <div className="rise mt-10 flex flex-wrap items-center gap-3" style={d(160)}>
+          <div className="rise mt-10 flex flex-wrap items-center gap-3" style={d(60)}>
             <button
               type="button"
               onClick={live ? onEnd : onStart}
+              onPointerEnter={onIntent}
+              onFocus={onIntent}
               disabled={busy}
               className={
                 "legend flex min-h-12 items-center gap-2.5 rounded-[6px] px-6 text-[12px] transition-[transform,background-color,color] duration-200 ease-[var(--ease-settle)] " +
@@ -104,20 +107,20 @@ export function MasterSection({
             </p>
           )}
 
-          <p className="rise mt-6 max-w-[54ch] text-[13px] leading-relaxed text-legend-dim" style={d(220)}>
+          <p className="rise mt-6 max-w-[54ch] text-[13px] leading-relaxed text-legend-dim" style={d(120)}>
             Your browser asks for the microphone; nothing is recorded. The agent sleeps when
             nobody is using it, so the first call after a quiet spell takes 10 to 20 seconds
             to connect. Interrupt it mid-sentence to see how fast it stops.
           </p>
 
-          <dl className="rise mt-12 flex flex-wrap gap-x-10 gap-y-5 border-t border-engrave pt-6" style={d(280)}>
+          <dl className="rise mt-12 flex flex-wrap gap-x-10 gap-y-5 border-t border-engrave pt-6" style={d(180)}>
             <Spec term="Time to first audio" value={`${MEASURED.browser.p50} ms`} note="p50, target 900 ms, missed" over />
             <Spec term="Tools" value="6" note="over MCP and SQLite" />
             <Spec term="Pickup to first word" value="1.64 s" note="on a phone call" />
           </dl>
         </div>
 
-        <Console live={live} busy={busy} turns={turns} />
+        <Console live={live} busy={busy} state={agentState} lines={lines} turns={turns} vizRef={vizRef} />
       </div>
     </section>
   );
@@ -146,14 +149,25 @@ const PROMPTS = [
 ];
 
 /** What you talk into: the state it is in, the signal, and what both sides said. */
-function Console({ live, busy, turns }: { live: boolean; busy: boolean; turns: TurnMetrics[] }) {
-  const { state, audioTrack } = useVoiceAssistant();
-  const room = useRoomContext();
-  const segments = useTranscriptions().slice(-6);
+function Console({
+  live,
+  busy,
+  state,
+  lines,
+  turns,
+  vizRef,
+}: {
+  live: boolean;
+  busy: boolean;
+  state: string;
+  lines: Line[];
+  turns: TurnMetrics[];
+  vizRef: (el: HTMLDivElement | null) => void;
+}) {
   const last = turns.at(-1);
 
   return (
-    <div className="rise raised rounded-[14px] p-2" style={d(200)}>
+    <div className="rise raised rounded-[14px] p-2" style={d(100)}>
       <div className="well overflow-hidden rounded-[9px]">
         <div className="flex items-center justify-between border-b border-engrave/70 px-5 py-3.5">
           <span className="legend text-[10px] text-legend-dim">Console</span>
@@ -179,18 +193,10 @@ function Console({ live, busy, turns }: { live: boolean; busy: boolean; turns: T
           </ol>
         </div>
 
-        <div className="h-28 px-5">
-          {live ? (
-            <BarVisualizer
-              state={state}
-              barCount={28}
-              trackRef={audioTrack}
-              options={{ minHeight: 4 }}
-              className="flex h-full w-full items-center justify-between [&>span]:w-[6px] [&>span]:rounded-full [&>span]:bg-panel-700 [&>span]:transition-colors [&>span[data-lk-highlighted=true]]:bg-signal"
-            />
-          ) : (
-            <IdleTrace connecting={busy} />
-          )}
+        <div className="relative h-28 px-5">
+          {/* The live visualizer is drawn into this slot by the call layer. */}
+          <div ref={vizRef} className="absolute inset-0 px-5" />
+          {!live && <IdleTrace connecting={busy} />}
         </div>
 
         <div
@@ -198,7 +204,7 @@ function Console({ live, busy, turns }: { live: boolean; busy: boolean; turns: T
           style={{ maskImage: "linear-gradient(to bottom, transparent, black 38%)" }}
           aria-live="polite"
         >
-          {segments.length === 0 ? (
+          {lines.length === 0 ? (
             <div>
               <p className="legend text-[9.5px] text-legend-dim">Try asking</p>
               <ul className="mt-2.5 flex flex-col gap-1.5">
@@ -210,17 +216,16 @@ function Console({ live, busy, turns }: { live: boolean; busy: boolean; turns: T
               </ul>
             </div>
           ) : (
-            segments.map((s) => {
-              const you = s.participantInfo.identity === room.localParticipant.identity;
+            lines.map(({ id, you, text }) => {
               return (
-                <p key={s.streamInfo.id} className="text-[14px] leading-snug">
+                <p key={id} className="text-[14px] leading-snug">
                   <span
                     className="legend mr-2 text-[9px]"
                     style={{ color: you ? "var(--color-legend-dim)" : "var(--color-signal)" }}
                   >
                     {you ? "You" : "Sonar"}
                   </span>
-                  <span className={you ? "text-legend" : "text-face"}>{s.text}</span>
+                  <span className={you ? "text-legend" : "text-face"}>{text}</span>
                 </p>
               );
             })

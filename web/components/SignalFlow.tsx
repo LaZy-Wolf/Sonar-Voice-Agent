@@ -1,6 +1,5 @@
 "use client";
 
-import { useVoiceAssistant } from "@livekit/components-react";
 import { LiveReadings } from "@/components/ChannelStrips";
 import { Section } from "@/components/Section";
 import type { TurnMetrics } from "@/lib/types";
@@ -25,9 +24,15 @@ const NODES: Node[] = [
 ];
 
 /** The pipeline as it runs. While you talk, the stage doing the work is lit. */
-export function SignalPath({ live, turns }: { live: boolean; turns: TurnMetrics[] }) {
-  const { state } = useVoiceAssistant();
-
+export function SignalPath({
+  live,
+  agentState: state,
+  turns,
+}: {
+  live: boolean;
+  agentState: string;
+  turns: TurnMetrics[];
+}) {
   return (
     <Section
       id="signal"

@@ -18,6 +18,12 @@ export type TurnMetrics = {
   ttfa_ms: number;
 };
 
+/** One transcribed line in the console. */
+export type Line = { id: string; you: boolean; text: string };
+
+/** Where a browser call is. */
+export type Session = "idle" | "connecting" | "live";
+
 /**
  * The four channel strips. `full` is full-scale deflection on the meter, chosen so a
  * healthy reading sits around two thirds of the sweep and an over-target one is
